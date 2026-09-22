@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,6 +18,12 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Applies to every route by default (see the APP_GUARD entry below);
+    // individual endpoints override this with @Throttle()/@SkipThrottle().
+    // 100 req/min per IP is generous enough not to trip over normal app
+    // usage (a single page load can easily fire a handful of requests) —
+    // this is meant to catch actual abuse, not slow down real usage.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60000, limit: 100 }]),
     PrismaModule,
     OrganizationModule,
     RoleModule,
@@ -31,6 +38,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
   providers: [
     AppService,
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

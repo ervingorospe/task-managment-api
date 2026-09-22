@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { diskStorage } from 'multer';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
@@ -91,6 +92,9 @@ export class TicketController {
     return this.ticketService.remove(ticketId);
   }
 
+  // File uploads are heavier (disk I/O, up to 10MB each) than a typical
+  // request, so they get a tighter limit than the app-wide default.
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Post(':ticketId/attachments')
   @UseInterceptors(attachmentUpload)
   addAttachment(
@@ -102,9 +106,7 @@ export class TicketController {
   }
 
   @Delete(':ticketId/attachments/:attachmentId')
-  removeAttachment(
-    @Param('attachmentId', ParseIntPipe) attachmentId: number,
-  ) {
+  removeAttachment(@Param('attachmentId', ParseIntPipe) attachmentId: number) {
     return this.ticketService.removeAttachment(attachmentId);
   }
 
