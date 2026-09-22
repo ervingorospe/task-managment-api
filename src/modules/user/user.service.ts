@@ -47,7 +47,7 @@ export class UserService {
    * organization logo uploads. */
   async uploadAvatar(userId: number, file: Express.Multer.File) {
     await this.findOrThrow(userId);
-    return this.s3.upload(file);
+    return this.s3.upload(file, 'profile');
   }
 
   private async findOrThrow(userId: number) {

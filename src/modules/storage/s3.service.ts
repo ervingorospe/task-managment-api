@@ -35,8 +35,11 @@ export class S3Service {
   // rather than just the upload feature that actually needs it.
   private client: S3Client | null = null;
 
-  async upload(file: Express.Multer.File): Promise<UploadedObject> {
-    const key = `attachments/${randomUUID()}${extname(file.originalname)}`;
+  async upload(
+    file: Express.Multer.File,
+    folder: string = 'attachments',
+  ): Promise<UploadedObject> {
+    const key = `${folder}/${randomUUID()}${extname(file.originalname)}`;
 
     await this.getClient().send(
       new PutObjectCommand({
