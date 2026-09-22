@@ -2,9 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { SesService } from '../email/ses.service';
+import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
 import {
   computeInviteExpiry,
   markExpiredInvites,
@@ -18,7 +22,59 @@ const RESEND_COOLDOWN_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class MemberService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(MemberService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly ses: SesService,
+  ) {}
+
+  // Sent *before* the invite row is created/updated (see invite() and
+  // resend() below) — a pending invite the invitee was never actually
+  // notified about is worse than no invite at all, so a failed send
+  // throws and nothing gets persisted. No token/accept-invite page exists
+  // yet, so the link just goes to the frontend's root, which redirects to
+  // /login — see .env.example.
+  private async sendInviteEmail(
+    to: string,
+    orgId: number,
+    roleId: number,
+    expiry: Date | null,
+    inviterName?: string,
+  ) {
+    const [organization, role] = await Promise.all([
+      this.prisma.organization.findUnique({
+        where: { id: orgId },
+        include: { settings: true },
+      }),
+      this.prisma.role.findUnique({ where: { id: roleId } }),
+    ]);
+    if (!organization) throw new NotFoundException('Organization not found.');
+    if (!role) throw new NotFoundException('Role not found.');
+
+    const { subject, html, text } = renderMemberInviteEmail({
+      organizationName: organization.organizationName,
+      organizationLogo: organization.settings?.logo,
+      inviterName: inviterName?.trim() || 'A team member',
+      roleName: role.roleName,
+      acceptUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+      expiresAt: expiry,
+    });
+
+    try {
+      await this.ses.send({ to, subject, html, text });
+      this.logger.log(`Invite email sent to ${to}`);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to send invite email to ${to}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      const detail = error instanceof Error ? error.message : 'Unknown error';
+      throw new InternalServerErrorException(
+        `Failed to send invite email: ${detail}`,
+      );
+    }
+  }
 
   async members(query: MembersQueryDto) {
     // The owner is surfaced separately via GET /organizations/:slug's
@@ -105,14 +161,20 @@ export class MemberService {
       where: { orgId },
       select: { inviteExpiration: true },
     });
+    const expiry = computeInviteExpiry(settings?.inviteExpiration);
+
+    // Send first — throws (and creates nothing) if it fails, so there's
+    // never a pending invite the invitee was never actually told about.
+    await this.sendInviteEmail(
+      dto.email,
+      orgId,
+      dto.roleId,
+      expiry,
+      dto.inviterName,
+    );
 
     return this.prisma.memberInvite.create({
-      data: {
-        orgId,
-        email: dto.email,
-        roleId: dto.roleId,
-        expiry: computeInviteExpiry(settings?.inviteExpiration),
-      },
+      data: { orgId, email: dto.email, roleId: dto.roleId, expiry },
     });
   }
 
@@ -148,15 +210,22 @@ export class MemberService {
       where: { orgId: invite.orgId },
       select: { inviteExpiration: true },
     });
+    // Resending gives it a fresh clock, same as a brand-new invite.
+    const expiry = computeInviteExpiry(settings?.inviteExpiration);
+
+    // Send first — if it fails, resentCount/lastSentAt/expiry stay
+    // untouched, same "don't persist what didn't actually go out" rule
+    // as invite().
+    await this.sendInviteEmail(
+      invite.email,
+      invite.orgId,
+      invite.roleId,
+      expiry,
+    );
 
     return this.prisma.memberInvite.update({
       where: { id: inviteId },
-      data: {
-        resentCount: { increment: 1 },
-        lastSentAt: new Date(),
-        // Resending gives it a fresh clock, same as a brand-new invite.
-        expiry: computeInviteExpiry(settings?.inviteExpiration),
-      },
+      data: { resentCount: { increment: 1 }, lastSentAt: new Date(), expiry },
     });
   }
 

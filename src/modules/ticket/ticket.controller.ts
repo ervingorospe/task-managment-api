@@ -14,9 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
-import { diskStorage } from 'multer';
-import { randomUUID } from 'crypto';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import { TicketService } from './ticket.service';
 import { TicketQueryDto } from './dto/ticket-query.dto';
 import { CountNumbersQueryDto } from './dto/count-numbers-query.dto';
@@ -26,18 +24,13 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AddCommentDto } from './dto/add-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 
-// 10MB cap and disk storage under ./uploads (served back by main.ts's
-// useStaticAssets) — this project has no S3/cloud storage set up, so local
-// disk is the whole story. Filenames are randomized on write so two
-// uploads with the same original name never collide or overwrite; the
-// user-facing name is kept separately in the DB (see addAttachment).
+// 10MB cap. Buffered in memory (not written to local disk) since
+// TicketService.addAttachment() uploads the buffer straight to S3 — see
+// storage/s3.service.ts. Filenames are randomized there so two uploads
+// with the same original name never collide; the user-facing name is
+// kept separately in the DB.
 const attachmentUpload = FileInterceptor('file', {
-  storage: diskStorage({
-    destination: './uploads',
-    filename: (_req, file, cb) => {
-      cb(null, `${randomUUID()}${extname(file.originalname)}`);
-    },
-  }),
+  storage: memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 

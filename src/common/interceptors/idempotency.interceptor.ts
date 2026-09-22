@@ -42,7 +42,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     if (!MUTATING_METHODS.has(method)) return next.handle();
 
     const key = request.headers['idempotency-key'];
-    console.log(key);
+
     if (!key || typeof key !== 'string') return next.handle();
 
     const existing = await this.prisma.idempotencyKey.findUnique({

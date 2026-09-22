@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { S3Service } from '../storage/s3.service';
 import { baseSlug } from '../../common/helper/slug.helper';
 import { retryOnUniqueConflict } from '../../common/helper/retry-on-conflict.helper';
 import type { CreateOrganizationDto } from './dto/create-organization.dto';
@@ -18,7 +19,10 @@ import type { RequestOwnershipTransferDto } from './dto/request-ownership-transf
 export class OrganizationService {
   private readonly logger = new Logger(OrganizationService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3: S3Service,
+  ) {}
 
   private async uniqueSlug(name: string): Promise<string> {
     const base = baseSlug(name);
@@ -304,6 +308,13 @@ export class OrganizationService {
     }
 
     return this.prisma.organization.update({ where: { id: orgId }, data: dto });
+  }
+
+  /** Just the upload — the caller still PATCHes :orgId/settings with the
+   * returned url to actually persist it as the org's logo. */
+  async uploadLogo(orgId: number, file: Express.Multer.File) {
+    await this.findActiveOrThrow(orgId);
+    return this.s3.upload(file);
   }
 
   async updateSettings(orgId: number, dto: UpdateOrgSettingsDto) {

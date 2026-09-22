@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { unlink } from 'fs';
-import { join } from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
+import { S3Service } from '../storage/s3.service';
 import { formatReferenceId } from '../../common/helper/reference-id.helper';
 import { retryOnUniqueConflict } from '../../common/helper/retry-on-conflict.helper';
 import type { TicketQueryDto } from './dto/ticket-query.dto';
@@ -19,7 +18,10 @@ function isNumeric(value: string): boolean {
 export class TicketService {
   private readonly logger = new Logger(TicketService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly s3: S3Service,
+  ) {}
 
   private ticketWhere(
     orgId: number,
@@ -318,16 +320,15 @@ export class TicketService {
     });
   }
 
-  async addAttachment(
-    ticketId: number,
-    file: { originalname: string; filename: string; size: number },
-  ) {
+  async addAttachment(ticketId: number, file: Express.Multer.File) {
     await this.findOrThrow(ticketId);
+    const uploaded = await this.s3.upload(file);
+
     return this.prisma.ticketAttachment.create({
       data: {
         ticketId,
         name: file.originalname,
-        url: `/uploads/${file.filename}`,
+        url: uploaded.url,
         size: file.size,
       },
     });
@@ -341,9 +342,10 @@ export class TicketService {
 
     await this.prisma.ticketAttachment.delete({ where: { id: attachmentId } });
 
-    // Best-effort disk cleanup — an already-missing file shouldn't fail the
-    // request, since the DB row (now gone) is what the UI actually reflects.
-    unlink(join(process.cwd(), attachment.url), () => {});
+    // Best-effort — the DB row (now gone) is what the UI actually
+    // reflects, so a failed/already-missing S3 object shouldn't fail
+    // the request. See S3Service.delete().
+    await this.s3.delete(attachment.url);
 
     return attachment;
   }

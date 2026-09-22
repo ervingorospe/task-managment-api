@@ -5,17 +5,30 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseFilePipe,
   ParseIntPipe,
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { OrganizationService } from './organization.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrgBasicInfoDto } from './dto/update-org-basic-info.dto';
 import { UpdateOrgSettingsDto } from './dto/update-org-settings.dto';
 import { UpdateOrgActiveStateDto } from './dto/update-org-active-state.dto';
 import { RequestOwnershipTransferDto } from './dto/request-ownership-transfer.dto';
+
+// 5MB cap — logos are small images, not general attachments. Buffered in
+// memory and uploaded to S3 (see storage/s3.service.ts), same as ticket
+// attachments.
+const logoUpload = FileInterceptor('file', {
+  storage: memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 @Controller('organizations')
 export class OrganizationController {
@@ -63,6 +76,16 @@ export class OrganizationController {
     @Body() dto: UpdateOrgBasicInfoDto,
   ) {
     return this.organizationService.updateBasicInfo(orgId, dto);
+  }
+
+  @Post(':orgId/logo')
+  @UseInterceptors(logoUpload)
+  uploadLogo(
+    @Param('orgId', ParseIntPipe) orgId: number,
+    @UploadedFile(new ParseFilePipe({ fileIsRequired: true }))
+    file: Express.Multer.File,
+  ) {
+    return this.organizationService.uploadLogo(orgId, file);
   }
 
   @Patch(':orgId/settings')

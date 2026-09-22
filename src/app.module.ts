@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { configValidationSchema } from './config/config-validation.schema';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,7 +18,10 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validationSchema: configValidationSchema,
+    }),
     // Applies to every route by default (see the APP_GUARD entry below);
     // individual endpoints override this with @Throttle()/@SkipThrottle().
     // 100 req/min per IP is generous enough not to trip over normal app

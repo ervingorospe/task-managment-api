@@ -1,20 +1,18 @@
-import { join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
-import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create(AppModule);
 
   // Wide open for now — no auth exists yet, so there's no origin to trust
   // or reject. Lock this down to real allowed origins once auth ships.
   app.enableCors({ origin: true });
 
-  // Ticket attachments are saved to disk (see ticket.controller.ts) and
-  // served back from here — no S3/cloud storage wired up for this project.
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
+  // Ticket attachments now go straight to S3 (see modules/storage/s3.service.ts)
+  // and are served from there directly — this backend no longer stores or
+  // serves attachment files itself.
 
   app.useGlobalPipes(
     new ValidationPipe({
