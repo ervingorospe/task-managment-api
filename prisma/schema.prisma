@@ -1,0 +1,418 @@
+// Ticketing backend schema.
+//
+// One deliberate exception to normal FK modeling: ActivityLogEntry has NO
+// relations to anything else. It's an append-only audit log — every id/name
+// it needs to render or filter a row is copied onto the row itself at write
+// time, so it keeps reading correctly even if the ticket/member/etc. it
+// describes is later changed or removed. Don't add a @relation to it.
+//
+// Another deliberate choice: organization name (per owner), tag name (per
+// org), and role name (per org) are NOT enforced as DB-level unique
+// constraints here. The business rule is "unique among non-deleted rows,
+// but if a matching soft-deleted row exists, revive/update it instead of
+// inserting a new one" — that's service-layer logic (see each module's
+// service), not something a single unique index can express cleanly
+// alongside soft deletes.
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pg_trgm]
+}
+
+// ---------------------------------------------------------------------------
+// Users & Organizations
+// ---------------------------------------------------------------------------
+
+enum AccountType {
+  OWNER
+  MEMBER
+}
+
+model User {
+  id          Int         @id @default(autoincrement())
+  firstName   String
+  lastName    String
+  email       String      @unique
+  avatar      String?
+  accountType AccountType @default(MEMBER)
+  isActive    Boolean     @default(true)
+  isDeleted   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  ownedOrganizations Organization[]  @relation("OrganizationOwner")
+  memberships        Member[]
+  comments           TicketComment[]
+
+  @@map("users")
+}
+
+model Organization {
+  id               Int      @id @default(autoincrement())
+  ownerId          Int
+  organizationName String   @db.VarChar(50)
+  organizationDesc String?  @db.VarChar(10000)
+  email            String?  @db.VarChar(50)
+  website          String?  @db.VarChar(50)
+  isDeleted        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  owner    User                  @relation("OrganizationOwner", fields: [ownerId], references: [id])
+  settings OrganizationSettings?
+  capacity OrganizationCapacity?
+  roles    Role[]
+  tags     Tag[]
+  members  Member[]
+  invites  MemberInvite[]
+  tickets  Ticket[]
+  requests TicketRequest[]
+
+  @@index([ownerId, isDeleted])
+  @@map("organizations")
+}
+
+model OrganizationSettings {
+  id               Int      @id @default(autoincrement())
+  orgId            Int      @unique
+  slug             String   @unique
+  logo             String?  @db.VarChar(250)
+  timezone         String   @db.VarChar(250)
+  inviteExpiration String   @default("1_day")
+  sendEmailNotif   Boolean  @default(true)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("organization_settings")
+}
+
+model OrganizationCapacity {
+  id       Int @id @default(autoincrement())
+  orgId    Int @unique
+  members  Int @default(20)
+  tags     Int @default(20)
+  roles    Int @default(10)
+  tickets  Int @default(1000)
+  projects Int @default(10)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("organization_capacities")
+}
+
+// ---------------------------------------------------------------------------
+// RBAC — Roles & Rules
+// ---------------------------------------------------------------------------
+
+model RuleCategory {
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
+  rules Rule[]
+
+  @@map("rule_categories")
+}
+
+model Rule {
+  id         Int    @id @default(autoincrement())
+  action     String @unique
+  name       String
+  desc       String
+  categoryId Int
+
+  category RuleCategory @relation(fields: [categoryId], references: [id])
+  roles    Role[]       @relation("RoleRules")
+
+  @@map("rules")
+}
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  orgId     Int?
+  roleName  String   @db.VarChar(50)
+  roleDesc  String?  @db.VarChar(1000)
+  isDefault Boolean  @default(false)
+  isLocked  Boolean  @default(false)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization?  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  rules        Rule[]         @relation("RoleRules")
+  members      Member[]
+  invites      MemberInvite[]
+
+  @@index([orgId, isDeleted])
+  @@map("roles")
+}
+
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
+
+model Tag {
+  id        Int      @id @default(autoincrement())
+  // Null orgId = a global default template (cloned into every new org),
+  // mirroring how Role.orgId works for the four global role templates.
+  orgId     Int?
+  tagName   String   @db.VarChar(50)
+  color     String
+  isDefault Boolean  @default(false)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tickets      Ticket[]
+
+  @@index([orgId, isDeleted])
+  @@map("tags")
+}
+
+// ---------------------------------------------------------------------------
+// Members & Invites
+// ---------------------------------------------------------------------------
+
+model Member {
+  id        Int      @id @default(autoincrement())
+  orgId     Int
+  userId    Int?
+  roleId    Int
+  firstName String
+  lastName  String
+  email     String
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role            Role            @relation(fields: [roleId], references: [id])
+  clientTickets   Ticket[]        @relation("TicketClient")
+  assignedTickets Ticket[]        @relation("TicketAssignees")
+  clientRequests  TicketRequest[] @relation("RequestClient")
+
+  @@index([orgId, isDeleted])
+  @@index([userId])
+  @@map("members")
+}
+
+enum InviteType {
+  MEMBERSHIP
+  OWNERSHIP
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+model MemberInvite {
+  id          Int          @id @default(autoincrement())
+  orgId       Int
+  roleId      Int
+  email       String
+  token       String?      @unique
+  expiry      DateTime?
+  resentCount Int          @default(0)
+  lastSentAt  DateTime?
+  type        InviteType   @default(MEMBERSHIP)
+  status      InviteStatus @default(PENDING)
+  isDeleted   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id])
+
+  @@index([orgId, isDeleted])
+  @@map("member_invites")
+}
+
+// ---------------------------------------------------------------------------
+// Tickets
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id          Int       @id @default(autoincrement())
+  orgId       Int
+  referenceId String
+  title       String
+  description String?
+  tagId       Int
+  clientId    Int?
+  dueDate     DateTime?
+  starred     Boolean   @default(false)
+  isDeleted   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tag          Tag                @relation(fields: [tagId], references: [id])
+  client       Member?            @relation("TicketClient", fields: [clientId], references: [id])
+  assignees    Member[]           @relation("TicketAssignees")
+  attachments  TicketAttachment[]
+  comments     TicketComment[]
+  request      TicketRequest?
+
+  @@unique([orgId, referenceId])
+  // Leading (orgId, isDeleted) covers every ticket query — that pair is in
+  // literally every WHERE clause in ticket.service.ts — and trailing
+  // createdAt lets the default `orderBy: createdAt desc` pagination read
+  // straight off the index instead of sorting the whole org's tickets
+  // first.
+  @@index([orgId, isDeleted, createdAt])
+  // The tag filter (ticketWhere's tagId `in` list) and countNumbers()'s
+  // per-tag counts.
+  @@index([orgId, tagId])
+  // The overdue filter and dueDateFrom/dueDateTo range filter.
+  @@index([orgId, dueDate])
+  // The Starred page's filterBy=starred.
+  @@index([orgId, starred])
+  // The ticket.view.included scoping join (`client: { userId }`).
+  @@index([clientId])
+  // Title/reference-ID search does a `contains` (leading-wildcard ILIKE),
+  // which a plain B-tree index can't accelerate — trigram GIN indexes
+  // (see the pg_trgm extension above) can.
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([referenceId(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("tickets")
+}
+
+model TicketAttachment {
+  id       Int    @id @default(autoincrement())
+  ticketId Int
+  name     String
+  url      String
+  size     Int
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
+}
+
+model TicketComment {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  userId    Int
+  comment   String   @db.VarChar(10000)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId, isDeleted])
+  @@map("ticket_comments")
+}
+
+// ---------------------------------------------------------------------------
+// Ticket Requests
+// ---------------------------------------------------------------------------
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model TicketRequest {
+  id          Int           @id @default(autoincrement())
+  orgId       Int
+  referenceId String
+  title       String
+  description String?
+  clientId    Int
+  ticketId    Int?          @unique
+  status      RequestStatus @default(PENDING)
+  remarks     String?
+  isDeleted   Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  organization Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  client       Member              @relation("RequestClient", fields: [clientId], references: [id])
+  ticket       Ticket?             @relation(fields: [ticketId], references: [id])
+  attachments  RequestAttachment[]
+
+  @@unique([orgId, referenceId])
+  @@index([orgId, isDeleted, createdAt])
+  @@index([orgId, status])
+  @@index([clientId])
+  @@map("ticket_requests")
+}
+
+model RequestAttachment {
+  id        Int    @id @default(autoincrement())
+  requestId Int
+  name      String
+  url       String
+  size      Int
+
+  request TicketRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("request_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Activity Log — standalone, no relations (see header note)
+// ---------------------------------------------------------------------------
+
+enum ActivityModule {
+  TICKET
+  REQUEST
+  MEMBER
+  ROLE
+  TAG
+}
+
+model ActivityLogEntry {
+  id              Int            @id @default(autoincrement())
+  orgId           Int
+  module          ActivityModule
+  action          String
+  entityId        Int
+  entityLabel     String
+  referenceId     String?
+  actorId         Int
+  actorName       String
+  actorAvatar     String?
+  involvedUserIds Int[]
+  description     String
+  createdAt       DateTime       @default(now())
+
+  @@index([orgId])
+  @@index([orgId, module])
+  @@map("activity_log_entries")
+}
+
+// Backs the Idempotency-Key pattern (see IdempotencyInterceptor): a
+// client-supplied key on any POST/PATCH/PUT/DELETE gets its response
+// cached here, so a retried request with the same key returns the
+// original result instead of repeating the action.
+model IdempotencyKey {
+  key            String   @id
+  method         String
+  path           String
+  responseStatus Int
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+
+  @@map("idempotency_keys")
+}

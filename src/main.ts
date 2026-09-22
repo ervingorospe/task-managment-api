@@ -1,0 +1,53 @@
+import { join } from 'path';
+import { NestFactory } from '@nestjs/core';
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Wide open for now — no auth exists yet, so there's no origin to trust
+  // or reject. Lock this down to real allowed origins once auth ships.
+  app.enableCors({ origin: true });
+
+  // Ticket attachments are saved to disk (see ticket.controller.ts) and
+  // served back from here — no S3/cloud storage wired up for this project.
+  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
+
+  // Catches everything a controller/service throws (or a raw Prisma error)
+  // and turns it into a clean JSON response instead of a stack trace or a
+  // silently hung request. See the filter's own header comment.
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  await app.listen(process.env.PORT ?? 3001);
+}
+
+// Last-resort safety nets: something outside a request (a stray promise, a
+// timer callback) throwing here would otherwise kill the whole process.
+// Log it and keep the server up rather than take every in-flight request
+// down with it. This is a deliberate tradeoff for this stage of the
+// project — production systems more often prefer to exit and let a process
+// manager restart with a clean slate, since an uncaughtException can leave
+// in-memory state inconsistent.
+const logger = new Logger('Process');
+process.on('unhandledRejection', (reason) => {
+  logger.error(
+    'Unhandled promise rejection',
+    reason instanceof Error ? reason.stack : String(reason),
+  );
+});
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught exception', error.stack);
+});
+
+bootstrap();

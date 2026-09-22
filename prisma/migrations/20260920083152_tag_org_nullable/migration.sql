@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "tags" ALTER COLUMN "orgId" DROP NOT NULL;
