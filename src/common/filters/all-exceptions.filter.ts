@@ -13,6 +13,11 @@ interface ErrorBody {
   statusCode: number;
   error: string;
   message: string | string[];
+  /** Optional machine-readable discriminator for a client that needs to
+   * branch on more than the HTTP status — e.g. auth's UNVERIFIED, which
+   * needs different frontend handling than any other 403. Present only
+   * when the thrown exception's own payload included one. */
+  code?: string;
 }
 
 const PRISMA_ERROR_MAP: Record<string, { status: number; error: string }> = {
@@ -76,6 +81,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         statusCode: status,
         error: (asRecord.error as string) ?? exception.name,
         message: (asRecord.message as string | string[]) ?? exception.message,
+        ...(typeof asRecord.code === 'string' ? { code: asRecord.code } : {}),
       };
     }
 

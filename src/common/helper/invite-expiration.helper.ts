@@ -16,9 +16,7 @@ export function computeInviteExpiry(
   durationKey: string | null | undefined,
   from: Date = new Date(),
 ): Date {
-  const [amountStr, unitRaw] = (durationKey || DEFAULT_DURATION_KEY).split(
-    '_',
-  );
+  const [amountStr, unitRaw] = (durationKey || DEFAULT_DURATION_KEY).split('_');
   const amount = Number(amountStr) || 1;
   const unit = unitRaw?.replace(/s$/, '');
 

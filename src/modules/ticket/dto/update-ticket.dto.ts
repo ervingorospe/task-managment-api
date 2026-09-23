@@ -1,14 +1,15 @@
-import { Type } from 'class-transformer';
 import {
-  IsArray,
-  IsBoolean,
   IsDateString,
-  IsInt,
   IsOptional,
   IsString,
   ValidateIf,
 } from 'class-validator';
 
+// tagId, assigneeIds, and starred each moved to their own endpoint/DTO
+// (update-ticket-tag, update-ticket-assignees, update-ticket-star) — each
+// is gated by a different Rule (ticket.change.tag / ticket.assign / view
+// access), so they can't share one combined permission check the way this
+// title/description/dueDate trio can under ticket.update.
 export class UpdateTicketDto {
   @IsOptional()
   @IsString()
@@ -19,21 +20,7 @@ export class UpdateTicketDto {
   description?: string;
 
   @IsOptional()
-  @IsInt()
-  tagId?: number;
-
-  @IsOptional()
-  @IsArray()
-  @Type(() => Number)
-  @IsInt({ each: true })
-  assigneeIds?: number[];
-
-  @IsOptional()
   @ValidateIf((_, value) => value !== null)
   @IsDateString()
   dueDate?: string | null;
-
-  @IsOptional()
-  @IsBoolean()
-  starred?: boolean;
 }

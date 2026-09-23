@@ -39,4 +39,17 @@ export const configValidationSchema = Joi.object({
   // .default() wouldn't actually reach that code; the fallback lives
   // where FRONTEND_URL is read instead.
   FRONTEND_URL: Joi.string().allow('').optional(),
+
+  // Auth (see modules/auth/). Required, not optional like S3/SES — the
+  // app has no working login at all without these, unlike attachments or
+  // outgoing mail, which degrade gracefully on their own.
+  GOOGLE_CLIENT_ID: Joi.string().required(),
+  GOOGLE_CLIENT_SECRET: Joi.string().required(),
+  GOOGLE_CALLBACK_URL: Joi.string().required(),
+  JWT_SECRET: Joi.string().required(),
+  // Backend's own public URL — used to build the verify-email link (which
+  // must point at this backend's /auth/verify-email, not the frontend).
+  // Same read-process.env.directly pattern as FRONTEND_URL, so not
+  // defaulted here either.
+  BACKEND_URL: Joi.string().allow('').optional(),
 });

@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../storage/s3.service';
 import { formatReferenceId } from '../../common/helper/reference-id.helper';
@@ -7,11 +12,20 @@ import type { TicketQueryDto } from './dto/ticket-query.dto';
 import type { CountNumbersQueryDto } from './dto/count-numbers-query.dto';
 import type { CreateTicketDto } from './dto/create-ticket.dto';
 import type { UpdateTicketDto } from './dto/update-ticket.dto';
+import type { UpdateTicketTagDto } from './dto/update-ticket-tag.dto';
+import type { UpdateTicketAssigneesDto } from './dto/update-ticket-assignees.dto';
+import type { UpdateTicketStarDto } from './dto/update-ticket-star.dto';
 import type { AddCommentDto } from './dto/add-comment.dto';
 import type { UpdateCommentDto } from './dto/update-comment.dto';
 import type { PersonalTicketQueryDto } from './dto/personal-ticket-query.dto';
 import type { PersonalCountNumbersQueryDto } from './dto/personal-count-numbers-query.dto';
 import type { CreatePersonalTicketDto } from './dto/create-personal-ticket.dto';
+
+const TICKET_MUTATION_INCLUDE = {
+  tag: true,
+  client: { include: { user: true } },
+  assignees: { include: { user: true } },
+} as const;
 
 function isNumeric(value: string): boolean {
   return /^\d+$/.test(value);
@@ -351,23 +365,47 @@ export class TicketService {
       data: {
         title: dto.title,
         description: dto.description,
-        tagId: dto.tagId,
-        starred: dto.starred,
         dueDate:
           dto.dueDate === undefined
             ? undefined
             : dto.dueDate
               ? new Date(dto.dueDate)
               : null,
-        assignees: dto.assigneeIds
-          ? { set: dto.assigneeIds.map((id) => ({ id })) }
-          : undefined,
       },
-      include: {
-        tag: true,
-        client: { include: { user: true } },
-        assignees: { include: { user: true } },
-      },
+      include: TICKET_MUTATION_INCLUDE,
+    });
+  }
+
+  // tagId doubles as "status" in this app (see the schema's Ticket.tagId
+  // comment) — gated by ticket.change.tag, separately from the rest of a
+  // ticket's fields under ticket.update.
+  async updateTag(ticketId: number, dto: UpdateTicketTagDto) {
+    await this.findOrThrow(ticketId);
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { tagId: dto.tagId },
+      include: TICKET_MUTATION_INCLUDE,
+    });
+  }
+
+  async updateAssignees(ticketId: number, dto: UpdateTicketAssigneesDto) {
+    await this.findOrThrow(ticketId);
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { assignees: { set: dto.assigneeIds.map((id) => ({ id })) } },
+      include: TICKET_MUTATION_INCLUDE,
+    });
+  }
+
+  // Starring is a personal bookmark, not an edit to the ticket's actual
+  // content — no ticket.update permission required, just view access
+  // (enforced at the route, see ticket.controller.ts).
+  async updateStar(ticketId: number, dto: UpdateTicketStarDto) {
+    await this.findOrThrow(ticketId);
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { starred: dto.starred },
+      include: TICKET_MUTATION_INCLUDE,
     });
   }
 
@@ -379,29 +417,28 @@ export class TicketService {
     });
   }
 
-  async addComment(ticketId: number, dto: AddCommentDto) {
+  async addComment(ticketId: number, authorId: number, dto: AddCommentDto) {
     await this.findOrThrow(ticketId);
 
-    try {
-      return await this.prisma.ticketComment.create({
-        data: { ticketId, userId: dto.userId, comment: dto.comment },
-        include: { author: true },
-      });
-    } catch (error) {
-      // The global filter already turns a P2003 into a clean 400, but
-      // "userId does not exist" is easy to hit here specifically (no auth
-      // yet, so the caller supplies userId by hand — see AddCommentDto),
-      // so it's worth a clearer message and a log line naming which
-      // ticket/user combo failed.
-      this.logger.warn(
-        `Failed to add comment: ticketId=${ticketId} userId=${dto.userId}`,
-      );
-      throw error;
-    }
+    return this.prisma.ticketComment.create({
+      data: { ticketId, userId: authorId, comment: dto.comment },
+      include: { author: true },
+    });
   }
 
-  async updateComment(commentId: number, dto: UpdateCommentDto) {
-    await this.findCommentOrThrow(commentId);
+  // "At any circumstances a user can only edit its own comment" — no role,
+  // including Superadmin, bypasses this. Enforced here rather than only at
+  // the route (ticket.edit.comment gates *whether* you can edit a comment
+  // at all; this gates *which* comments, which no Rule can express).
+  async updateComment(
+    commentId: number,
+    callerId: number,
+    dto: UpdateCommentDto,
+  ) {
+    const comment = await this.findCommentOrThrow(commentId);
+    if (comment.userId !== callerId) {
+      throw new ForbiddenException('You can only edit your own comments.');
+    }
     return this.prisma.ticketComment.update({
       where: { id: commentId },
       data: { comment: dto.comment },
@@ -443,8 +480,11 @@ export class TicketService {
     return attachment;
   }
 
-  async removeComment(commentId: number) {
-    await this.findCommentOrThrow(commentId);
+  async removeComment(commentId: number, callerId: number) {
+    const comment = await this.findCommentOrThrow(commentId);
+    if (comment.userId !== callerId) {
+      throw new ForbiddenException('You can only remove your own comments.');
+    }
     return this.prisma.ticketComment.update({
       where: { id: commentId },
       data: { isDeleted: true },

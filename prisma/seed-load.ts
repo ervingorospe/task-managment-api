@@ -41,11 +41,16 @@ const BATCH = 2000;
 
 function chunks<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  for (let i = 0; i < items.length; i += size)
+    out.push(items.slice(i, i + size));
   return out;
 }
 
-async function runBatches<T>(label: string, items: T[], fn: (batch: T[]) => Promise<unknown>) {
+async function runBatches<T>(
+  label: string,
+  items: T[],
+  fn: (batch: T[]) => Promise<unknown>,
+) {
   const batches = chunks(items, BATCH);
   for (let i = 0; i < batches.length; i++) {
     await fn(batches[i]);
@@ -60,13 +65,20 @@ async function runBatches<T>(label: string, items: T[], fn: (batch: T[]) => Prom
 async function createManyReturning(model: any, data: any[], label: string) {
   const before = (await model.aggregate({ _max: { id: true } }))._max.id ?? 0;
   await runBatches(label, data, (batch) => model.createMany({ data: batch }));
-  return model.findMany({ where: { id: { gt: before } }, orderBy: { id: 'asc' } });
+  return model.findMany({
+    where: { id: { gt: before } },
+    orderBy: { id: 'asc' },
+  });
 }
 
 /** Bulk-insert an implicit many-to-many join table via raw SQL — safe here
  * because every value is an integer id we generated ourselves, never
  * user input. */
-async function bulkInsertJoin(table: string, pairs: [number, number][], label: string) {
+async function bulkInsertJoin(
+  table: string,
+  pairs: [number, number][],
+  label: string,
+) {
   for (const batch of chunks(pairs, 5000)) {
     if (batch.length === 0) continue;
     const values = batch.map(([a, b]) => `(${a},${b})`).join(',');
@@ -82,7 +94,10 @@ function pick<T>(arr: T[]): T {
 }
 
 function pickSome<T>(arr: T[], min: number, max: number): T[] {
-  const n = Math.min(arr.length, Math.floor(Math.random() * (max - min + 1)) + min);
+  const n = Math.min(
+    arr.length,
+    Math.floor(Math.random() * (max - min + 1)) + min,
+  );
   return faker.helpers.arrayElements(arr, n);
 }
 
@@ -100,11 +115,16 @@ async function main() {
   console.time('seed-load');
 
   // -- Reference data must already exist (run `npx prisma db seed` first) --
-  const globalRoles = await prisma.role.findMany({ where: { orgId: null }, include: { rules: true } });
+  const globalRoles = await prisma.role.findMany({
+    where: { orgId: null },
+    include: { rules: true },
+  });
   const globalTags = await prisma.tag.findMany({ where: { orgId: null } });
   const allRules = await prisma.rule.findMany();
   if (globalRoles.length === 0 || globalTags.length === 0) {
-    throw new Error('Run `npx prisma db seed` first — no global role/tag templates found.');
+    throw new Error(
+      'Run `npx prisma db seed` first — no global role/tag templates found.',
+    );
   }
   const roleTemplateByName = new Map(globalRoles.map((r) => [r.roleName, r]));
 
@@ -127,7 +147,10 @@ async function main() {
   });
   const users = await createManyReturning(prisma.user, userInputs, 'users');
   const ownerUsers = users.slice(0, COUNTS.owners);
-  const clientUsers = users.slice(COUNTS.owners, COUNTS.owners + COUNTS.clients);
+  const clientUsers = users.slice(
+    COUNTS.owners,
+    COUNTS.owners + COUNTS.clients,
+  );
   const staffUsers = users.slice(COUNTS.owners + COUNTS.clients);
 
   // ---------------------------------------------------------------------
@@ -141,7 +164,11 @@ async function main() {
     email: truncate(faker.internet.email().toLowerCase(), 50),
     website: truncate(faker.internet.url(), 50),
   }));
-  const organizations = await createManyReturning(prisma.organization, orgInputs, 'organizations');
+  const organizations = await createManyReturning(
+    prisma.organization,
+    orgInputs,
+    'organizations',
+  );
 
   await runBatches(
     'org settings',
@@ -180,7 +207,14 @@ async function main() {
     ),
   );
 
-  const roleInputs: { orgId: number; roleName: string; roleDesc: string | null; isDefault: boolean; isLocked: boolean; _templateName?: string }[] = [];
+  const roleInputs: {
+    orgId: number;
+    roleName: string;
+    roleDesc: string | null;
+    isDefault: boolean;
+    isLocked: boolean;
+    _templateName?: string;
+  }[] = [];
   for (const org of organizations) {
     for (const templateName of roleTemplates) {
       const template = roleTemplateByName.get(templateName)!;
@@ -206,13 +240,24 @@ async function main() {
   }
 
   const roleCreateData = roleInputs.map(({ _templateName, ...rest }) => rest);
-  const createdRoles = await createManyReturning(prisma.role, roleCreateData, 'roles');
+  const createdRoles = await createManyReturning(
+    prisma.role,
+    roleCreateData,
+    'roles',
+  );
 
   // createMany preserves array order -> sequential ids, so zip back up.
   const roleRulePairs: [number, number][] = [];
   const orgRoleIndex = new Map<number, Record<string, number>>(); // orgId -> { roleName: roleId }
   const supportLeadRuleIds = allRules
-    .filter((r: any) => ['ticket.view.all', 'ticket.assign', 'ticket.change.status', 'member.view.clients'].includes(r.action))
+    .filter((r: any) =>
+      [
+        'ticket.view.all',
+        'ticket.assign',
+        'ticket.change.status',
+        'member.view.clients',
+      ].includes(r.action),
+    )
     .map((r: any) => r.id);
 
   createdRoles.forEach((role: any, i: number) => {
@@ -224,7 +269,8 @@ async function main() {
       const template = roleTemplateByName.get(input._templateName)!;
       for (const rule of template.rules) roleRulePairs.push([role.id, rule.id]);
     } else {
-      for (const ruleId of supportLeadRuleIds) roleRulePairs.push([role.id, ruleId]);
+      for (const ruleId of supportLeadRuleIds)
+        roleRulePairs.push([role.id, ruleId]);
     }
   });
 
@@ -235,13 +281,28 @@ async function main() {
   //    the same extras subset — "add some ... tags").
   // ---------------------------------------------------------------------
   console.log('Seeding tags per organization...');
-  const tagInputs: { orgId: number; tagName: string; color: string; isDefault: boolean }[] = [];
+  const tagInputs: {
+    orgId: number;
+    tagName: string;
+    color: string;
+    isDefault: boolean;
+  }[] = [];
   for (const org of organizations) {
     for (const tpl of globalTags) {
-      tagInputs.push({ orgId: org.id, tagName: tpl.tagName, color: tpl.color, isDefault: true });
+      tagInputs.push({
+        orgId: org.id,
+        tagName: tpl.tagName,
+        color: tpl.color,
+        isDefault: true,
+      });
     }
     if (orgsWithExtras.has(org.id)) {
-      tagInputs.push({ orgId: org.id, tagName: 'Urgent', color: '#C23A3F', isDefault: false });
+      tagInputs.push({
+        orgId: org.id,
+        tagName: 'Urgent',
+        color: '#C23A3F',
+        isDefault: false,
+      });
     }
   }
   const createdTags = await createManyReturning(prisma.tag, tagInputs, 'tags');
@@ -257,7 +318,15 @@ async function main() {
   //    per organization.
   // ---------------------------------------------------------------------
   console.log('Seeding members per organization...');
-  const memberInputs: { orgId: number; userId: number; roleId: number; firstName: string; lastName: string; email: string; _kind: 'owner' | 'client' | 'staff' }[] = [];
+  const memberInputs: {
+    orgId: number;
+    userId: number;
+    roleId: number;
+    firstName: string;
+    lastName: string;
+    email: string;
+    _kind: 'owner' | 'client' | 'staff';
+  }[] = [];
   for (const org of organizations) {
     const roles = orgRoleIndex.get(org.id)!;
     const owner = ownerUsers.find((u: any) => u.id === org.ownerId)!;
@@ -295,17 +364,23 @@ async function main() {
     }
   }
   const memberCreateData = memberInputs.map(({ _kind, ...rest }) => rest);
-  const createdMembers = await createManyReturning(prisma.member, memberCreateData, 'members');
+  const createdMembers = await createManyReturning(
+    prisma.member,
+    memberCreateData,
+    'members',
+  );
 
   const orgClientMembers = new Map<number, number[]>();
   const orgAssignableMembers = new Map<number, number[]>(); // staff + owner, not clients
   createdMembers.forEach((member: any, i: number) => {
     const kind = memberInputs[i]._kind;
     if (kind === 'client') {
-      if (!orgClientMembers.has(member.orgId)) orgClientMembers.set(member.orgId, []);
+      if (!orgClientMembers.has(member.orgId))
+        orgClientMembers.set(member.orgId, []);
       orgClientMembers.get(member.orgId)!.push(member.id);
     } else {
-      if (!orgAssignableMembers.has(member.orgId)) orgAssignableMembers.set(member.orgId, []);
+      if (!orgAssignableMembers.has(member.orgId))
+        orgAssignableMembers.set(member.orgId, []);
       orgAssignableMembers.get(member.orgId)!.push(member.id);
     }
   });
@@ -339,21 +414,37 @@ async function main() {
       description: Math.random() < 0.7 ? faker.lorem.paragraph() : null,
       tagId: pick(tags),
       clientId: clients.length && Math.random() < 0.7 ? pick(clients) : null,
-      dueDate: hasDueDate ? faker.date.between({ from: faker.date.recent({ days: 30 }), to: faker.date.soon({ days: 30 }) }) : null,
+      dueDate: hasDueDate
+        ? faker.date.between({
+            from: faker.date.recent({ days: 30 }),
+            to: faker.date.soon({ days: 30 }),
+          })
+        : null,
       starred: Math.random() < 0.1,
       createdAt,
       updatedAt: createdAt,
     });
-    ticketAssigneesByIndex.push(assignable.length ? pickSome(assignable, 0, 3) : []);
+    ticketAssigneesByIndex.push(
+      assignable.length ? pickSome(assignable, 0, 3) : [],
+    );
   }
 
-  const createdTickets = await createManyReturning(prisma.ticket, ticketInputs, 'tickets');
+  const createdTickets = await createManyReturning(
+    prisma.ticket,
+    ticketInputs,
+    'tickets',
+  );
 
   const assigneePairs: [number, number][] = [];
   createdTickets.forEach((ticket: any, i: number) => {
-    for (const memberId of ticketAssigneesByIndex[i]) assigneePairs.push([memberId, ticket.id]);
+    for (const memberId of ticketAssigneesByIndex[i])
+      assigneePairs.push([memberId, ticket.id]);
   });
-  await bulkInsertJoin('_TicketAssignees', assigneePairs, 'ticket-assignee links');
+  await bulkInsertJoin(
+    '_TicketAssignees',
+    assigneePairs,
+    'ticket-assignee links',
+  );
 
   // ---------------------------------------------------------------------
   // 7. Ticket requests, distributed across orgs. Kept independent of the
@@ -391,7 +482,11 @@ async function main() {
       updatedAt: createdAt,
     });
   }
-  await createManyReturning(prisma.ticketRequest, requestInputs, 'ticket requests');
+  await createManyReturning(
+    prisma.ticketRequest,
+    requestInputs,
+    'ticket requests',
+  );
 
   // ---------------------------------------------------------------------
   // 8. Comments, spread across a random subset of the tickets just made.
@@ -401,7 +496,10 @@ async function main() {
   for (let i = 0; i < COUNTS.commentsTotal; i++) {
     const ticket = pick(createdTickets);
     const author = pick(users);
-    const createdAt = faker.date.between({ from: ticket.createdAt, to: new Date() });
+    const createdAt = faker.date.between({
+      from: ticket.createdAt,
+      to: new Date(),
+    });
     commentInputs.push({
       ticketId: ticket.id,
       userId: author.id,
@@ -410,7 +508,9 @@ async function main() {
       updatedAt: createdAt,
     });
   }
-  await runBatches('comments', commentInputs, (batch) => prisma.ticketComment.createMany({ data: batch }));
+  await runBatches('comments', commentInputs, (batch) =>
+    prisma.ticketComment.createMany({ data: batch }),
+  );
 
   console.timeEnd('seed-load');
   console.log('Done:', {

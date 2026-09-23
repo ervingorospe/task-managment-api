@@ -5,13 +5,19 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../storage/s3.service';
+import { SesService } from '../email/ses.service';
+import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
+import { computeInviteExpiry } from '../../common/helper/invite-expiration.helper';
 import { baseSlug } from '../../common/helper/slug.helper';
 import { retryOnUniqueConflict } from '../../common/helper/retry-on-conflict.helper';
 import type { CreateOrganizationDto } from './dto/create-organization.dto';
 import type { UpdateOrgBasicInfoDto } from './dto/update-org-basic-info.dto';
-import type { UpdateOrgSettingsDto } from './dto/update-org-settings.dto';
+import type { UpdateOrgTimezoneDto } from './dto/update-org-timezone.dto';
+import type { UpdateOrgInviteExpirationDto } from './dto/update-org-invite-expiration.dto';
+import type { UpdateOrgNotificationsDto } from './dto/update-org-notifications.dto';
 import type { UpdateOrgActiveStateDto } from './dto/update-org-active-state.dto';
 import type { RequestOwnershipTransferDto } from './dto/request-ownership-transfer.dto';
 
@@ -22,6 +28,7 @@ export class OrganizationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3: S3Service,
+    private readonly ses: SesService,
   ) {}
 
   private async uniqueSlug(name: string): Promise<string> {
@@ -38,15 +45,20 @@ export class OrganizationService {
     return candidate;
   }
 
-  async create(dto: CreateOrganizationDto) {
+  async create(dto: CreateOrganizationDto, ownerId: number) {
     const owner = await this.prisma.user.findFirst({
-      where: { id: dto.ownerId, isDeleted: false },
+      where: { id: ownerId, isDeleted: false },
     });
     if (!owner) throw new BadRequestException('ownerId does not exist.');
 
+    // No accountType gate here (or anywhere else) — any authenticated,
+    // verified user can create an organization. It's how someone becomes a
+    // member of anything in the first place (they're assigned the new
+    // org's Superadmin role), so it can't itself depend on already holding
+    // a rule somewhere.
     const existing = await this.prisma.organization.findFirst({
       where: {
-        ownerId: dto.ownerId,
+        ownerId,
         organizationName: dto.organizationName,
         isDeleted: false,
       },
@@ -67,7 +79,7 @@ export class OrganizationService {
       );
     } catch (error) {
       this.logger.error(
-        `Failed to create organization "${dto.organizationName}" for owner ${dto.ownerId}`,
+        `Failed to create organization "${dto.organizationName}" for owner ${ownerId}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
@@ -76,14 +88,19 @@ export class OrganizationService {
 
   private async createWithFreshSlug(
     dto: CreateOrganizationDto,
-    owner: { id: number; firstName: string; lastName: string; email: string },
+    owner: {
+      id: number;
+      firstName: string;
+      lastName: string;
+      email: string;
+    },
   ) {
     const slug = await this.uniqueSlug(dto.organizationName);
 
     return this.prisma.$transaction(async (tx) => {
       const organization = await tx.organization.create({
         data: {
-          ownerId: dto.ownerId,
+          ownerId: owner.id,
           organizationName: dto.organizationName,
           organizationDesc: dto.organizationDesc,
           email: dto.email,
@@ -141,6 +158,15 @@ export class OrganizationService {
         },
       });
 
+      // Creating an organization is one of the two onboarding paths (the
+      // other is choosing "Personal") — mark it done here so a fresh
+      // owner who picks "Organization" doesn't get bounced straight back
+      // to /onboarding after landing in the org they just made.
+      await tx.user.update({
+        where: { id: owner.id },
+        data: { hasOnboarded: true },
+      });
+
       for (const tagDto of dto.tags) {
         await tx.tag.create({
           data: {
@@ -152,6 +178,9 @@ export class OrganizationService {
         });
       }
 
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      const inviterName = `${owner.firstName} ${owner.lastName}`.trim();
+
       for (const inviteDto of dto.invites) {
         const resolvedRoleId = roleIdMap.get(inviteDto.roleId);
         if (!resolvedRoleId) {
@@ -159,11 +188,43 @@ export class OrganizationService {
             `invites[].roleId ${inviteDto.roleId} does not match any role in roles[].`,
           );
         }
+
+        const roleDto = dto.roles.find((r) => r.id === inviteDto.roleId);
+        const token = randomBytes(32).toString('hex');
+        const expiry = computeInviteExpiry(undefined);
+
+        const { subject, html, text } = renderMemberInviteEmail({
+          organizationName: organization.organizationName,
+          organizationLogo: dto.logo,
+          inviterName: inviterName || 'A team member',
+          roleName: roleDto?.roleName ?? 'Member',
+          acceptUrl: `${frontendUrl}/accept-invite?token=${token}`,
+          expiresAt: expiry,
+        });
+
+        try {
+          await this.ses.send({ to: inviteDto.email, subject, html, text });
+        } catch (error) {
+          // A flaky send on one invite shouldn't sink the whole org the
+          // owner just spent a multi-step wizard creating — skip this one
+          // (same "never persist a pending invite that wasn't actually
+          // communicated" rule as member.service.ts's invite(), just
+          // scoped to this row instead of the whole transaction) and let
+          // the owner send it again later from the Members page.
+          this.logger.warn(
+            `Failed to send invite email to ${inviteDto.email} during org creation`,
+            error instanceof Error ? error.stack : undefined,
+          );
+          continue;
+        }
+
         await tx.memberInvite.create({
           data: {
             orgId: organization.id,
             roleId: resolvedRoleId,
             email: inviteDto.email,
+            expiry,
+            token,
           },
         });
       }
@@ -244,7 +305,10 @@ export class OrganizationService {
         : invite,
     );
     const justExpiredIds = invites
-      .filter((invite: any, i: number) => invite.status !== organization.invites[i].status)
+      .filter(
+        (invite: any, i: number) =>
+          invite.status !== organization.invites[i].status,
+      )
       .map((invite: any) => invite.id);
     if (justExpiredIds.length > 0) {
       await tx.memberInvite.updateMany({
@@ -257,7 +321,8 @@ export class OrganizationService {
     // progress" — only a still-PENDING one blocks the banner (and, per
     // requestOwnershipTransfer's own check, blocks starting a new one).
     const pendingOwnershipTransfer = invites.find(
-      (invite: any) => invite.type === 'OWNERSHIP' && invite.status === 'PENDING',
+      (invite: any) =>
+        invite.type === 'OWNERSHIP' && invite.status === 'PENDING',
     );
     const pendingInvites = invites.filter(
       (invite: any) => invite.type === 'MEMBERSHIP',
@@ -310,18 +375,43 @@ export class OrganizationService {
     return this.prisma.organization.update({ where: { id: orgId }, data: dto });
   }
 
-  /** Just the upload — the caller still PATCHes :orgId/settings with the
-   * returned url to actually persist it as the org's logo. */
+  /** Uploads to S3 and persists the result as the org's logo in one step —
+   * a single action gated by organization.update.logo, not two calls the
+   * frontend has to sequence itself. */
   async uploadLogo(orgId: number, file: Express.Multer.File) {
     await this.findActiveOrThrow(orgId);
-    return this.s3.upload(file);
+    const uploaded = await this.s3.upload(file);
+    await this.prisma.organizationSettings.update({
+      where: { orgId },
+      data: { logo: uploaded.url },
+    });
+    return uploaded;
   }
 
-  async updateSettings(orgId: number, dto: UpdateOrgSettingsDto) {
+  async updateTimezone(orgId: number, dto: UpdateOrgTimezoneDto) {
     await this.findActiveOrThrow(orgId);
     return this.prisma.organizationSettings.update({
       where: { orgId },
-      data: dto,
+      data: { timezone: dto.timezone },
+    });
+  }
+
+  async updateInviteExpiration(
+    orgId: number,
+    dto: UpdateOrgInviteExpirationDto,
+  ) {
+    await this.findActiveOrThrow(orgId);
+    return this.prisma.organizationSettings.update({
+      where: { orgId },
+      data: { inviteExpiration: dto.inviteExpiration },
+    });
+  }
+
+  async updateNotifications(orgId: number, dto: UpdateOrgNotificationsDto) {
+    await this.findActiveOrThrow(orgId);
+    return this.prisma.organizationSettings.update({
+      where: { orgId },
+      data: { sendEmailNotif: dto.sendEmailNotif },
     });
   }
 

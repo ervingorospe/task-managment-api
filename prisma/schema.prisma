@@ -29,22 +29,31 @@ datasource db {
 // Users & Organizations
 // ---------------------------------------------------------------------------
 
-enum AccountType {
-  OWNER
-  MEMBER
-}
-
 model User {
-  id          Int         @id @default(autoincrement())
-  firstName   String
-  lastName    String
-  email       String      @unique
-  avatar      String?
-  accountType AccountType @default(MEMBER)
-  isActive    Boolean     @default(true)
-  isDeleted   Boolean     @default(false)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id        Int      @id @default(autoincrement())
+  firstName String
+  lastName  String
+  email     String   @unique
+  avatar    String?
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Auth. passwordHash is null for a Google-only account; googleId is null
+  // for a password-only account — a user can end up with both if a Google
+  // sign-in is later linked onto an existing password account with the
+  // same email.
+  passwordHash String?
+  googleId     String? @unique
+  isVerified   Boolean @default(false)
+  hasOnboarded Boolean @default(false)
+
+  // Email verification — a single in-flight token per user (no separate
+  // table needed, only one verification purpose exists today).
+  verificationToken       String?   @unique
+  verificationTokenExpiry DateTime?
+  lastVerificationSentAt  DateTime?
 
   ownedOrganizations Organization[]  @relation("OrganizationOwner")
   memberships        Member[]

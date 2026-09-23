@@ -16,10 +16,34 @@ const prisma = new PrismaClient({
 });
 
 const ACCOUNTS = [
-  { firstName: 'Jane', lastName: 'Doe', email: 'jane@acmestudio.com', accountType: 'OWNER' as const, roleName: 'Superadmin' },
-  { firstName: 'Marco', lastName: 'Cruz', email: 'marco@acmestudio.com', accountType: 'MEMBER' as const, roleName: 'Admin' },
-  { firstName: 'Priya', lastName: 'Nair', email: 'priya@acmestudio.com', accountType: 'MEMBER' as const, roleName: 'Member' },
-  { firstName: 'Alex', lastName: 'Rivera', email: 'alex@clientco.com', accountType: 'MEMBER' as const, roleName: 'Client' },
+  {
+    firstName: 'Jane',
+    lastName: 'Doe',
+    email: 'jane@acmestudio.com',
+    accountType: 'OWNER' as const,
+    roleName: 'Superadmin',
+  },
+  {
+    firstName: 'Marco',
+    lastName: 'Cruz',
+    email: 'marco@acmestudio.com',
+    accountType: 'MEMBER' as const,
+    roleName: 'Admin',
+  },
+  {
+    firstName: 'Priya',
+    lastName: 'Nair',
+    email: 'priya@acmestudio.com',
+    accountType: 'MEMBER' as const,
+    roleName: 'Member',
+  },
+  {
+    firstName: 'Alex',
+    lastName: 'Rivera',
+    email: 'alex@clientco.com',
+    accountType: 'MEMBER' as const,
+    roleName: 'Client',
+  },
 ];
 
 const TICKET_TITLES = [
@@ -41,20 +65,34 @@ const REQUEST_TITLES = [
 ];
 
 async function main() {
-  console.log('Seeding mock-parity accounts (jane/marco/priya/alex @ Acme Studio)...');
+  console.log(
+    'Seeding mock-parity accounts (jane/marco/priya/alex @ Acme Studio)...',
+  );
 
-  const globalRoles = await prisma.role.findMany({ where: { orgId: null }, include: { rules: true } });
+  const globalRoles = await prisma.role.findMany({
+    where: { orgId: null },
+    include: { rules: true },
+  });
   const globalTags = await prisma.tag.findMany({ where: { orgId: null } });
   if (globalRoles.length === 0 || globalTags.length === 0) {
-    throw new Error('Run `npx prisma db seed` first — no global role/tag templates found.');
+    throw new Error(
+      'Run `npx prisma db seed` first — no global role/tag templates found.',
+    );
   }
   const roleTemplateByName = new Map(globalRoles.map((r) => [r.roleName, r]));
 
-  const users = new Map<string, { id: number; firstName: string; lastName: string; email: string }>();
+  const users = new Map<
+    string,
+    { id: number; firstName: string; lastName: string; email: string }
+  >();
   for (const account of ACCOUNTS) {
     const user = await prisma.user.upsert({
       where: { email: account.email },
-      update: { firstName: account.firstName, lastName: account.lastName, accountType: account.accountType },
+      update: {
+        firstName: account.firstName,
+        lastName: account.lastName,
+        accountType: account.accountType,
+      },
       create: {
         firstName: account.firstName,
         lastName: account.lastName,
@@ -77,7 +115,8 @@ async function main() {
       data: {
         ownerId: owner.id,
         organizationName: 'Acme Studio',
-        organizationDesc: 'A small studio building tools for independent creators.',
+        organizationDesc:
+          'A small studio building tools for independent creators.',
         email: 'hello@acmestudio.com',
         website: 'https://acmestudio.com',
       },
@@ -90,14 +129,18 @@ async function main() {
         timezone: 'Asia/Manila',
       },
     });
-    await prisma.organizationCapacity.create({ data: { orgId: organization.id } });
+    await prisma.organizationCapacity.create({
+      data: { orgId: organization.id },
+    });
   }
   const orgId = organization.id;
 
   const roleIdByName = new Map<string, number>();
   for (const templateName of ['Superadmin', 'Client', 'Member', 'Admin']) {
     const template = roleTemplateByName.get(templateName)!;
-    let role = await prisma.role.findFirst({ where: { orgId, roleName: templateName } });
+    let role = await prisma.role.findFirst({
+      where: { orgId, roleName: templateName },
+    });
     if (!role) {
       role = await prisma.role.create({
         data: {
@@ -115,10 +158,17 @@ async function main() {
 
   const tagIds: number[] = [];
   for (const tpl of globalTags) {
-    let tag = await prisma.tag.findFirst({ where: { orgId, tagName: tpl.tagName } });
+    let tag = await prisma.tag.findFirst({
+      where: { orgId, tagName: tpl.tagName },
+    });
     if (!tag) {
       tag = await prisma.tag.create({
-        data: { orgId, tagName: tpl.tagName, color: tpl.color, isDefault: true },
+        data: {
+          orgId,
+          tagName: tpl.tagName,
+          color: tpl.color,
+          isDefault: true,
+        },
       });
     }
     tagIds.push(tag.id);
@@ -127,7 +177,9 @@ async function main() {
   const memberByEmail = new Map<string, { id: number }>();
   for (const account of ACCOUNTS) {
     const user = users.get(account.email)!;
-    let member = await prisma.member.findFirst({ where: { orgId, userId: user.id } });
+    let member = await prisma.member.findFirst({
+      where: { orgId, userId: user.id },
+    });
     if (!member) {
       member = await prisma.member.create({
         data: {
@@ -144,7 +196,10 @@ async function main() {
   }
 
   const client = memberByEmail.get('alex@clientco.com')!;
-  const staffPool = [memberByEmail.get('marco@acmestudio.com')!, memberByEmail.get('priya@acmestudio.com')!];
+  const staffPool = [
+    memberByEmail.get('marco@acmestudio.com')!,
+    memberByEmail.get('priya@acmestudio.com')!,
+  ];
 
   const existingTicketCount = await prisma.ticket.count({ where: { orgId } });
   if (existingTicketCount === 0) {
@@ -158,13 +213,16 @@ async function main() {
           tagId: tagIds[i % tagIds.length],
           clientId: i % 3 === 0 ? client.id : null,
           assignees: { connect: [staffPool[i % staffPool.length]] },
-          dueDate: i % 2 === 0 ? new Date(Date.now() + (i - 3) * 86_400_000) : null,
+          dueDate:
+            i % 2 === 0 ? new Date(Date.now() + (i - 3) * 86_400_000) : null,
         },
       });
     }
   }
 
-  const existingRequestCount = await prisma.ticketRequest.count({ where: { orgId } });
+  const existingRequestCount = await prisma.ticketRequest.count({
+    where: { orgId },
+  });
   if (existingRequestCount === 0) {
     for (let i = 0; i < REQUEST_TITLES.length; i++) {
       await prisma.ticketRequest.create({
@@ -181,7 +239,9 @@ async function main() {
     }
   }
 
-  console.log(`Done. Organization "${organization.organizationName}" (slug: acme-studio, id: ${orgId}).`);
+  console.log(
+    `Done. Organization "${organization.organizationName}" (slug: acme-studio, id: ${orgId}).`,
+  );
 }
 
 main()

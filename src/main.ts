@@ -1,14 +1,22 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Wide open for now — no auth exists yet, so there's no origin to trust
-  // or reject. Lock this down to real allowed origins once auth ships.
-  app.enableCors({ origin: true });
+  // Real auth now exists — the session cookie is httpOnly and cross-origin
+  // (frontend and backend are different domains), so `credentials: true`
+  // plus a specific origin (not the old wide-open `origin: true`) is
+  // required for the browser to send/accept it.
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+  });
+
+  app.use(cookieParser());
 
   // Ticket attachments now go straight to S3 (see modules/storage/s3.service.ts)
   // and are served from there directly — this backend no longer stores or

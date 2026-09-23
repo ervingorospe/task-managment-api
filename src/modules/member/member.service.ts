@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SesService } from '../email/ses.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
@@ -40,6 +41,7 @@ export class MemberService {
     orgId: number,
     roleId: number,
     expiry: Date | null,
+    token: string,
     inviterName?: string,
   ) {
     const [organization, role] = await Promise.all([
@@ -52,12 +54,13 @@ export class MemberService {
     if (!organization) throw new NotFoundException('Organization not found.');
     if (!role) throw new NotFoundException('Role not found.');
 
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     const { subject, html, text } = renderMemberInviteEmail({
       organizationName: organization.organizationName,
       organizationLogo: organization.settings?.logo,
       inviterName: inviterName?.trim() || 'A team member',
       roleName: role.roleName,
-      acceptUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+      acceptUrl: `${frontendUrl}/accept-invite?token=${token}`,
       expiresAt: expiry,
     });
 
@@ -162,6 +165,7 @@ export class MemberService {
       select: { inviteExpiration: true },
     });
     const expiry = computeInviteExpiry(settings?.inviteExpiration);
+    const token = randomBytes(32).toString('hex');
 
     // Send first — throws (and creates nothing) if it fails, so there's
     // never a pending invite the invitee was never actually told about.
@@ -170,11 +174,12 @@ export class MemberService {
       orgId,
       dto.roleId,
       expiry,
+      token,
       dto.inviterName,
     );
 
     return this.prisma.memberInvite.create({
-      data: { orgId, email: dto.email, roleId: dto.roleId, expiry },
+      data: { orgId, email: dto.email, roleId: dto.roleId, expiry, token },
     });
   }
 
@@ -212,8 +217,11 @@ export class MemberService {
     });
     // Resending gives it a fresh clock, same as a brand-new invite.
     const expiry = computeInviteExpiry(settings?.inviteExpiration);
+    // Same token as before — this is the same invite, just resent, not a
+    // new one. Only generates one if this row predates the token field.
+    const token = invite.token ?? randomBytes(32).toString('hex');
 
-    // Send first — if it fails, resentCount/lastSentAt/expiry stay
+    // Send first — if it fails, resentCount/lastSentAt/expiry/token stay
     // untouched, same "don't persist what didn't actually go out" rule
     // as invite().
     await this.sendInviteEmail(
@@ -221,11 +229,17 @@ export class MemberService {
       invite.orgId,
       invite.roleId,
       expiry,
+      token,
     );
 
     return this.prisma.memberInvite.update({
       where: { id: inviteId },
-      data: { resentCount: { increment: 1 }, lastSentAt: new Date(), expiry },
+      data: {
+        resentCount: { increment: 1 },
+        lastSentAt: new Date(),
+        expiry,
+        token,
+      },
     });
   }
 

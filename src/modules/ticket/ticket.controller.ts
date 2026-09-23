@@ -21,11 +21,23 @@ import { CountNumbersQueryDto } from './dto/count-numbers-query.dto';
 import { AllTicketsQueryDto } from './dto/all-tickets-query.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { UpdateTicketTagDto } from './dto/update-ticket-tag.dto';
+import { UpdateTicketAssigneesDto } from './dto/update-ticket-assignees.dto';
+import { UpdateTicketStarDto } from './dto/update-ticket-star.dto';
 import { AddCommentDto } from './dto/add-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { PersonalTicketQueryDto } from './dto/personal-ticket-query.dto';
 import { PersonalCountNumbersQueryDto } from './dto/personal-count-numbers-query.dto';
 import { CreatePersonalTicketDto } from './dto/create-personal-ticket.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import type { RequestUser } from '../../common/guards/permissions.guard';
+import { PERMISSIONS } from '../../common/permissions/permissions.constant';
+
+const CAN_VIEW_TICKETS = [
+  PERMISSIONS.TICKET_VIEW_ALL,
+  PERMISSIONS.TICKET_VIEW_INCLUDED,
+];
 
 // 10MB cap. Buffered in memory (not written to local disk) since
 // TicketService.addAttachment() uploads the buffer straight to S3 — see
@@ -42,59 +54,65 @@ export class TicketController {
   constructor(private readonly ticketService: TicketService) {}
 
   // Static routes first — otherwise ':ticketId' below would swallow these.
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('count-numbers')
   countNumbers(@Query() query: CountNumbersQueryDto) {
     return this.ticketService.countNumbers(query);
   }
 
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('recent')
   recent(@Query('orgId', ParseIntPipe) orgId: number) {
     return this.ticketService.recent(orgId);
   }
 
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('all')
   all(@Query() query: AllTicketsQueryDto) {
     return this.ticketService.allForOrg(query.orgId, query.involvesUserId);
   }
 
   // "personal" routes ahead of ':ticketId' for the same reason — a
-  // ticket owned directly by a user (Personal mode), no org involved.
-  // No auth yet, so userId is supplied explicitly by the caller, same
-  // stand-in as AddCommentDto.userId until real auth exists.
+  // ticket owned directly by a user (Personal mode), no org/role/rule
+  // involved. Identity comes from the session, not a client-supplied
+  // userId — otherwise any logged-in user could read/write anyone else's
+  // personal tickets just by changing the query param.
   @Get('personal/count-numbers')
   countNumbersPersonal(
-    @Query('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: RequestUser,
     @Query() query: PersonalCountNumbersQueryDto,
   ) {
-    return this.ticketService.countNumbersPersonal(userId, query);
+    return this.ticketService.countNumbersPersonal(user.id, query);
   }
 
   @Get('personal/all')
-  allPersonal(@Query('userId', ParseIntPipe) userId: number) {
-    return this.ticketService.allForOwner(userId);
+  allPersonal(@CurrentUser() user: RequestUser) {
+    return this.ticketService.allForOwner(user.id);
   }
 
   @Get('personal')
   listPersonal(
-    @Query('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: RequestUser,
     @Query() query: PersonalTicketQueryDto,
   ) {
-    return this.ticketService.listPersonal(userId, query);
+    return this.ticketService.listPersonal(user.id, query);
   }
 
   @Post('personal')
   createPersonal(
-    @Query('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: RequestUser,
     @Body() dto: CreatePersonalTicketDto,
   ) {
-    return this.ticketService.createPersonal(userId, dto);
+    return this.ticketService.createPersonal(user.id, dto);
   }
 
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get()
   list(@Query() query: TicketQueryDto) {
     return this.ticketService.list(query);
   }
 
+  @RequirePermissions({ allOf: [PERMISSIONS.TICKET_CREATE] })
   @Post()
   create(
     @Query('orgId', ParseIntPipe) orgId: number,
@@ -103,11 +121,20 @@ export class TicketController {
     return this.ticketService.create(orgId, dto);
   }
 
+  // :ticketId routes below serve both org tickets and personal tickets —
+  // PermissionsGuard resolves which (see resolveTicketScope) and, for a
+  // personal ticket, requires the caller to be its owner instead of
+  // checking anyOf/allOf against an org role that doesn't apply to it.
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS, resource: 'ticket.ticketId' })
   @Get(':ticketId')
   details(@Param('ticketId', ParseIntPipe) ticketId: number) {
     return this.ticketService.details(ticketId);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_UPDATE],
+    resource: 'ticket.ticketId',
+  })
   @Patch(':ticketId')
   update(
     @Param('ticketId', ParseIntPipe) ticketId: number,
@@ -116,6 +143,47 @@ export class TicketController {
     return this.ticketService.update(ticketId, dto);
   }
 
+  // tagId doubles as "status" in this app — a separate Rule from the rest
+  // of a ticket's fields (see ticket.service.ts's updateTag() comment).
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_CHANGE_TAG],
+    resource: 'ticket.ticketId',
+  })
+  @Patch(':ticketId/tag')
+  updateTag(
+    @Param('ticketId', ParseIntPipe) ticketId: number,
+    @Body() dto: UpdateTicketTagDto,
+  ) {
+    return this.ticketService.updateTag(ticketId, dto);
+  }
+
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_ASSIGN],
+    resource: 'ticket.ticketId',
+  })
+  @Patch(':ticketId/assignees')
+  updateAssignees(
+    @Param('ticketId', ParseIntPipe) ticketId: number,
+    @Body() dto: UpdateTicketAssigneesDto,
+  ) {
+    return this.ticketService.updateAssignees(ticketId, dto);
+  }
+
+  // Starring is a personal bookmark, not an edit — anyone who can view the
+  // ticket can star/unstar it for themselves, no ticket.update needed.
+  @RequirePermissions({ anyOf: CAN_VIEW_TICKETS, resource: 'ticket.ticketId' })
+  @Patch(':ticketId/star')
+  updateStar(
+    @Param('ticketId', ParseIntPipe) ticketId: number,
+    @Body() dto: UpdateTicketStarDto,
+  ) {
+    return this.ticketService.updateStar(ticketId, dto);
+  }
+
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_REMOVE],
+    resource: 'ticket.ticketId',
+  })
   @Delete(':ticketId')
   remove(@Param('ticketId', ParseIntPipe) ticketId: number) {
     return this.ticketService.remove(ticketId);
@@ -123,6 +191,12 @@ export class TicketController {
 
   // File uploads are heavier (disk I/O, up to 10MB each) than a typical
   // request, so they get a tighter limit than the app-wide default.
+  // ticket.update = "title, description, and attachments" per this app's
+  // rule definitions — attachments aren't their own permission.
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_UPDATE],
+    resource: 'ticket.ticketId',
+  })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Post(':ticketId/attachments')
   @UseInterceptors(attachmentUpload)
@@ -134,29 +208,53 @@ export class TicketController {
     return this.ticketService.addAttachment(ticketId, file);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_UPDATE],
+    resource: 'ticketAttachment.attachmentId',
+  })
   @Delete(':ticketId/attachments/:attachmentId')
   removeAttachment(@Param('attachmentId', ParseIntPipe) attachmentId: number) {
     return this.ticketService.removeAttachment(attachmentId);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_COMMENT],
+    resource: 'ticket.ticketId',
+  })
   @Post(':ticketId/comments')
   addComment(
     @Param('ticketId', ParseIntPipe) ticketId: number,
+    @CurrentUser() user: RequestUser,
     @Body() dto: AddCommentDto,
   ) {
-    return this.ticketService.addComment(ticketId, dto);
+    return this.ticketService.addComment(ticketId, user.id, dto);
   }
 
+  // ticket.edit.comment only gates *whether* you can edit comments at
+  // all — TicketService.updateComment() enforces the actual "only your
+  // own, no exceptions" rule, since no Rule can express that part.
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_EDIT_COMMENT],
+    resource: 'ticketComment.commentId',
+  })
   @Patch('comments/:commentId')
   updateComment(
     @Param('commentId', ParseIntPipe) commentId: number,
+    @CurrentUser() user: RequestUser,
     @Body() dto: UpdateCommentDto,
   ) {
-    return this.ticketService.updateComment(commentId, dto);
+    return this.ticketService.updateComment(commentId, user.id, dto);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.TICKET_REMOVE_COMMENT],
+    resource: 'ticketComment.commentId',
+  })
   @Delete('comments/:commentId')
-  removeComment(@Param('commentId', ParseIntPipe) commentId: number) {
-    return this.ticketService.removeComment(commentId);
+  removeComment(
+    @Param('commentId', ParseIntPipe) commentId: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ticketService.removeComment(commentId, user.id);
   }
 }

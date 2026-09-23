@@ -96,9 +96,6 @@ export class CreateOrganizationDto {
   @IsTimeZone()
   timezone!: string;
 
-  @IsInt()
-  ownerId!: number;
-
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => OrgRoleDto)

@@ -9,16 +9,21 @@ import {
   ParseIntPipe,
   Patch,
   Post,
-  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { OrganizationService } from './organization.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import type { RequestUser } from '../../common/guards/permissions.guard';
+import { PERMISSIONS } from '../../common/permissions/permissions.constant';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrgBasicInfoDto } from './dto/update-org-basic-info.dto';
-import { UpdateOrgSettingsDto } from './dto/update-org-settings.dto';
+import { UpdateOrgTimezoneDto } from './dto/update-org-timezone.dto';
+import { UpdateOrgInviteExpirationDto } from './dto/update-org-invite-expiration.dto';
+import { UpdateOrgNotificationsDto } from './dto/update-org-notifications.dto';
 import { UpdateOrgActiveStateDto } from './dto/update-org-active-state.dto';
 import { RequestOwnershipTransferDto } from './dto/request-ownership-transfer.dto';
 
@@ -34,15 +39,25 @@ const logoUpload = FileInterceptor('file', {
 export class OrganizationController {
   constructor(private readonly organizationService: OrganizationService) {}
 
+  // ownerId comes from the session, not the body — a client-supplied
+  // ownerId would let anyone create an organization "owned by" any user
+  // id they choose. No permission gate beyond "logged in" — creating an
+  // org is how someone becomes a member of anything in the first place,
+  // so it can't itself depend on already holding a rule somewhere.
   @Post()
-  createOrganization(@Body() dto: CreateOrganizationDto) {
-    return this.organizationService.create(dto);
+  createOrganization(
+    @Body() dto: CreateOrganizationDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.organizationService.create(dto, user.id);
   }
 
   // Static routes first — otherwise ':slug' below would swallow these.
+  // ownerId comes from the session now, not the query — a client-supplied
+  // one would let any logged-in user list another user's organizations.
   @Get('my-own-organizations')
-  myOwnOrganizations(@Query('ownerId', ParseIntPipe) ownerId: number) {
-    return this.organizationService.myOwnOrganizations(ownerId);
+  myOwnOrganizations(@CurrentUser() user: RequestUser) {
+    return this.organizationService.myOwnOrganizations(user.id);
   }
 
   @Get('defaults/roles')
@@ -60,16 +75,24 @@ export class OrganizationController {
     return this.organizationService.defaultPermissions();
   }
 
+  // View access is membership-only — no specific Rule for "can see your
+  // own org's basic info", every active member of it can.
+  @RequirePermissions({ resource: 'param.orgId' })
   @Get('by-id/:orgId')
   organizationDetailsById(@Param('orgId', ParseIntPipe) orgId: number) {
     return this.organizationService.getDetailsById(orgId);
   }
 
+  @RequirePermissions({ resource: 'param.slug' })
   @Get(':slug')
   organizationDetails(@Param('slug') slug: string) {
     return this.organizationService.getDetailsBySlug(slug);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_UPDATE_BASIC_INFO],
+    resource: 'param.orgId',
+  })
   @Patch(':orgId/basic-info')
   updateBasicInfo(
     @Param('orgId', ParseIntPipe) orgId: number,
@@ -78,6 +101,10 @@ export class OrganizationController {
     return this.organizationService.updateBasicInfo(orgId, dto);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_UPDATE_LOGO],
+    resource: 'param.orgId',
+  })
   @Post(':orgId/logo')
   @UseInterceptors(logoUpload)
   uploadLogo(
@@ -88,14 +115,49 @@ export class OrganizationController {
     return this.organizationService.uploadLogo(orgId, file);
   }
 
-  @Patch(':orgId/settings')
-  updateSettings(
+  // Settings used to be one combined PATCH — split into one route per
+  // field so each can carry its own Rule (a role might be trusted to
+  // change the timezone but not the invite policy, etc.).
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_UPDATE_TIMEZONE],
+    resource: 'param.orgId',
+  })
+  @Patch(':orgId/settings/timezone')
+  updateTimezone(
     @Param('orgId', ParseIntPipe) orgId: number,
-    @Body() dto: UpdateOrgSettingsDto,
+    @Body() dto: UpdateOrgTimezoneDto,
   ) {
-    return this.organizationService.updateSettings(orgId, dto);
+    return this.organizationService.updateTimezone(orgId, dto);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_UPDATE_INVITE_EXPIRATION],
+    resource: 'param.orgId',
+  })
+  @Patch(':orgId/settings/invite-expiration')
+  updateInviteExpiration(
+    @Param('orgId', ParseIntPipe) orgId: number,
+    @Body() dto: UpdateOrgInviteExpirationDto,
+  ) {
+    return this.organizationService.updateInviteExpiration(orgId, dto);
+  }
+
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_UPDATE_NOTIFICATIONS],
+    resource: 'param.orgId',
+  })
+  @Patch(':orgId/settings/notifications')
+  updateNotifications(
+    @Param('orgId', ParseIntPipe) orgId: number,
+    @Body() dto: UpdateOrgNotificationsDto,
+  ) {
+    return this.organizationService.updateNotifications(orgId, dto);
+  }
+
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_DEACTIVATE],
+    resource: 'param.orgId',
+  })
   @Patch(':orgId/active-state')
   updateActiveState(
     @Param('orgId', ParseIntPipe) orgId: number,
@@ -108,12 +170,21 @@ export class OrganizationController {
   // updated row as a body), this one hard-deletes and returns nothing —
   // 204 tells the frontend not to try parsing a JSON body that isn't
   // there.
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_DELETE],
+    resource: 'param.orgId',
+  })
   @Delete(':orgId')
   @HttpCode(204)
   remove(@Param('orgId', ParseIntPipe) orgId: number) {
     return this.organizationService.remove(orgId);
   }
 
+  // Default seeding gives this rule to Superadmin only — see prisma/seed.ts.
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_CHANGE_OWNERSHIP],
+    resource: 'param.orgId',
+  })
   @Post(':orgId/ownership-transfer')
   requestOwnershipTransfer(
     @Param('orgId', ParseIntPipe) orgId: number,
@@ -122,6 +193,10 @@ export class OrganizationController {
     return this.organizationService.requestOwnershipTransfer(orgId, dto);
   }
 
+  @RequirePermissions({
+    allOf: [PERMISSIONS.ORGANIZATION_CHANGE_OWNERSHIP],
+    resource: 'param.orgId',
+  })
   @Delete(':orgId/ownership-transfer')
   cancelOwnershipTransfer(@Param('orgId', ParseIntPipe) orgId: number) {
     return this.organizationService.cancelOwnershipTransfer(orgId);
