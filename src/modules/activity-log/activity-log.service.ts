@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { LogActivityDto } from './dto/log-activity.dto';
 import type { ActivityLogQueryDto } from './dto/activity-log-query.dto';
+import type { PersonalActivityLogQueryDto } from './dto/personal-activity-log-query.dto';
 
 @Injectable()
 export class ActivityLogService {
@@ -32,6 +33,32 @@ export class ActivityLogService {
       };
     }
 
+    return this.listForWhere(where, query);
+  }
+
+  /** Personal (org-less) activity has no org to scope by — actorId does
+   * the job instead, since the owner is always the actor for their own
+   * personal-ticket activity. */
+  async listPersonal(userId: number, query: PersonalActivityLogQueryDto) {
+    const where: any = { orgId: null, actorId: userId };
+
+    if (query.module?.length) {
+      where.module = { in: query.module.map((m) => m.toUpperCase()) };
+    }
+    if (query.dateFrom || query.dateTo) {
+      where.createdAt = {
+        ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+        ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+      };
+    }
+
+    return this.listForWhere(where, query);
+  }
+
+  private async listForWhere(
+    where: any,
+    query: { page?: number; limit?: number },
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 15;
 

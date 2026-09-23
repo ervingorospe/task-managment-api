@@ -49,6 +49,7 @@ model User {
   ownedOrganizations Organization[]  @relation("OrganizationOwner")
   memberships        Member[]
   comments           TicketComment[]
+  personalTickets    Ticket[]        @relation("PersonalTicketOwner")
 
   @@map("users")
 }
@@ -247,7 +248,12 @@ model MemberInvite {
 
 model Ticket {
   id          Int       @id @default(autoincrement())
-  orgId       Int
+  // Exactly one of orgId/ownerId is set per row: org tickets have orgId,
+  // "personal" tickets (an owner-account user's own standalone tickets,
+  // no organization involved) have ownerId instead. Enforced in
+  // ticket.service.ts, not at the DB level.
+  orgId       Int?
+  ownerId     Int?
   referenceId String
   title       String
   description String?
@@ -259,7 +265,8 @@ model Ticket {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  organization Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  organization Organization?      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner        User?              @relation("PersonalTicketOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   tag          Tag                @relation(fields: [tagId], references: [id])
   client       Member?            @relation("TicketClient", fields: [clientId], references: [id])
   assignees    Member[]           @relation("TicketAssignees")
@@ -267,13 +274,20 @@ model Ticket {
   comments     TicketComment[]
   request      TicketRequest?
 
+  // Postgres treats every NULL as distinct in a unique index, so these two
+  // constraints coexist cleanly: an org ticket (ownerId null) never
+  // collides with the ownerId constraint, and a personal ticket (orgId
+  // null) never collides with the orgId one.
   @@unique([orgId, referenceId])
+  @@unique([ownerId, referenceId])
   // Leading (orgId, isDeleted) covers every ticket query — that pair is in
   // literally every WHERE clause in ticket.service.ts — and trailing
   // createdAt lets the default `orderBy: createdAt desc` pagination read
   // straight off the index instead of sorting the whole org's tickets
   // first.
   @@index([orgId, isDeleted, createdAt])
+  // Same shape as above, for personal-ticket queries.
+  @@index([ownerId, isDeleted, createdAt])
   // The tag filter (ticketWhere's tagId `in` list) and countNumbers()'s
   // per-tag counts.
   @@index([orgId, tagId])
@@ -384,7 +398,10 @@ enum ActivityModule {
 
 model ActivityLogEntry {
   id              Int            @id @default(autoincrement())
-  orgId           Int
+  // Null for a personal (org-less) ticket's activity — scoped by actorId
+  // instead, since the owner is always the actor for their own personal
+  // activity.
+  orgId           Int?
   module          ActivityModule
   action          String
   entityId        Int
@@ -399,6 +416,8 @@ model ActivityLogEntry {
 
   @@index([orgId])
   @@index([orgId, module])
+  // Personal-ticket activity queries (orgId null) scope by actorId instead.
+  @@index([actorId])
   @@map("activity_log_entries")
 }
 

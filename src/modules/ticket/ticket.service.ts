@@ -9,10 +9,17 @@ import type { CreateTicketDto } from './dto/create-ticket.dto';
 import type { UpdateTicketDto } from './dto/update-ticket.dto';
 import type { AddCommentDto } from './dto/add-comment.dto';
 import type { UpdateCommentDto } from './dto/update-comment.dto';
+import type { PersonalTicketQueryDto } from './dto/personal-ticket-query.dto';
+import type { PersonalCountNumbersQueryDto } from './dto/personal-count-numbers-query.dto';
+import type { CreatePersonalTicketDto } from './dto/create-personal-ticket.dto';
 
 function isNumeric(value: string): boolean {
   return /^\d+$/.test(value);
 }
+
+/** A ticket belongs to exactly one of these — an org, or (for a
+ * "personal", org-less ticket) its owning user. */
+type TicketScope = { orgId: number } | { ownerId: number };
 
 @Injectable()
 export class TicketService {
@@ -24,11 +31,11 @@ export class TicketService {
   ) {}
 
   private ticketWhere(
-    orgId: number,
+    scope: TicketScope,
     filterBy?: string[],
     involvesUserId?: number,
   ) {
-    const where: any = { orgId, isDeleted: false };
+    const where: any = { ...scope, isDeleted: false };
 
     if (filterBy?.includes('overdue')) {
       where.dueDate = { lt: new Date() };
@@ -52,14 +59,32 @@ export class TicketService {
 
   async countNumbers(query: CountNumbersQueryDto) {
     const where = this.ticketWhere(
-      query.orgId,
+      { orgId: query.orgId },
       query.filterBy,
       query.involvesUserId,
     );
-    if (query.dateFrom || query.dateTo) {
+    return this.countNumbersForWhere(where, query, { orgId: query.orgId });
+  }
+
+  /** Personal tickets use the fixed global tag templates (orgId: null),
+   * not an org's own tags. */
+  async countNumbersPersonal(
+    userId: number,
+    query: PersonalCountNumbersQueryDto,
+  ) {
+    const where = this.ticketWhere({ ownerId: userId }, query.filterBy);
+    return this.countNumbersForWhere(where, query, { orgId: null });
+  }
+
+  private async countNumbersForWhere(
+    where: any,
+    dateRange: { dateFrom?: string; dateTo?: string },
+    tagsWhere: { orgId: number | null },
+  ) {
+    if (dateRange.dateFrom || dateRange.dateTo) {
       where.createdAt = {
-        ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
-        ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+        ...(dateRange.dateFrom ? { gte: new Date(dateRange.dateFrom) } : {}),
+        ...(dateRange.dateTo ? { lte: new Date(dateRange.dateTo) } : {}),
       };
     }
 
@@ -72,7 +97,7 @@ export class TicketService {
         where: { ...where, dueDate: { lt: new Date() } },
       }),
       this.prisma.tag.findMany({
-        where: { orgId: query.orgId, isDeleted: false },
+        where: { ...tagsWhere, isDeleted: false },
       }),
       this.prisma.ticket.groupBy({
         by: ['tagId'],
@@ -108,7 +133,23 @@ export class TicketService {
    * none of those views render them.
    */
   async allForOrg(orgId: number, involvesUserId?: number) {
-    const where = this.ticketWhere(orgId, undefined, involvesUserId);
+    const where = this.ticketWhere({ orgId }, undefined, involvesUserId);
+    return this.prisma.ticket.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        tag: true,
+        client: { include: { user: true } },
+        assignees: { include: { user: true } },
+      },
+    });
+  }
+
+  /** Same shape as allForOrg, for a personal (org-less) space — no
+   * client/assignees exist without an org, but the include stays so the
+   * response shape matches what Dashboard/Reports already expect. */
+  async allForOwner(userId: number) {
+    const where = this.ticketWhere({ ownerId: userId });
     return this.prisma.ticket.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -139,10 +180,33 @@ export class TicketService {
 
   async list(query: TicketQueryDto) {
     const where = this.ticketWhere(
-      query.orgId,
+      { orgId: query.orgId },
       query.filterBy,
       query.involvesUserId,
     );
+    if (query.memberIds?.length) {
+      where.assignees = { some: { id: { in: query.memberIds } } };
+    }
+    return this.listForWhere(where, query);
+  }
+
+  /** Same as list(), minus the memberIds filter — a personal ticket has
+   * no assignees, since there's no org membership to assign from. */
+  async listPersonal(userId: number, query: PersonalTicketQueryDto) {
+    const where = this.ticketWhere({ ownerId: userId }, query.filterBy);
+    return this.listForWhere(where, query);
+  }
+
+  private async listForWhere(
+    where: any,
+    query: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      dueDateFrom?: string;
+      dueDateTo?: string;
+    },
+  ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 15;
 
@@ -160,9 +224,6 @@ export class TicketService {
           ],
         },
       ];
-    }
-    if (query.memberIds?.length) {
-      where.assignees = { some: { id: { in: query.memberIds } } };
     }
     if (query.dueDateFrom || query.dueDateTo) {
       where.dueDate = {
@@ -245,6 +306,38 @@ export class TicketService {
         tag: true,
         client: { include: { user: true } },
         assignees: { include: { user: true } },
+        attachments: true,
+      },
+    });
+  }
+
+  async createPersonal(userId: number, dto: CreatePersonalTicketDto) {
+    // Same race as create() above, scoped by ownerId+referenceId instead
+    // of orgId+referenceId — see the schema's unique constraints.
+    return retryOnUniqueConflict(() => this.createPersonalTicket(userId, dto));
+  }
+
+  private async createPersonalTicket(
+    userId: number,
+    dto: CreatePersonalTicketDto,
+  ) {
+    const existingCount = await this.prisma.ticket.count({
+      where: { ownerId: userId },
+    });
+    const referenceId = formatReferenceId('tckt', existingCount);
+
+    return this.prisma.ticket.create({
+      data: {
+        ownerId: userId,
+        referenceId,
+        title: dto.title,
+        description: dto.description,
+        tagId: dto.tagId,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        attachments: dto.attachments ? { create: dto.attachments } : undefined,
+      },
+      include: {
+        tag: true,
         attachments: true,
       },
     });

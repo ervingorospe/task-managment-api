@@ -23,6 +23,9 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { AddCommentDto } from './dto/add-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { PersonalTicketQueryDto } from './dto/personal-ticket-query.dto';
+import { PersonalCountNumbersQueryDto } from './dto/personal-count-numbers-query.dto';
+import { CreatePersonalTicketDto } from './dto/create-personal-ticket.dto';
 
 // 10MB cap. Buffered in memory (not written to local disk) since
 // TicketService.addAttachment() uploads the buffer straight to S3 — see
@@ -52,6 +55,39 @@ export class TicketController {
   @Get('all')
   all(@Query() query: AllTicketsQueryDto) {
     return this.ticketService.allForOrg(query.orgId, query.involvesUserId);
+  }
+
+  // "personal" routes ahead of ':ticketId' for the same reason — a
+  // ticket owned directly by a user (Personal mode), no org involved.
+  // No auth yet, so userId is supplied explicitly by the caller, same
+  // stand-in as AddCommentDto.userId until real auth exists.
+  @Get('personal/count-numbers')
+  countNumbersPersonal(
+    @Query('userId', ParseIntPipe) userId: number,
+    @Query() query: PersonalCountNumbersQueryDto,
+  ) {
+    return this.ticketService.countNumbersPersonal(userId, query);
+  }
+
+  @Get('personal/all')
+  allPersonal(@Query('userId', ParseIntPipe) userId: number) {
+    return this.ticketService.allForOwner(userId);
+  }
+
+  @Get('personal')
+  listPersonal(
+    @Query('userId', ParseIntPipe) userId: number,
+    @Query() query: PersonalTicketQueryDto,
+  ) {
+    return this.ticketService.listPersonal(userId, query);
+  }
+
+  @Post('personal')
+  createPersonal(
+    @Query('userId', ParseIntPipe) userId: number,
+    @Body() dto: CreatePersonalTicketDto,
+  ) {
+    return this.ticketService.createPersonal(userId, dto);
   }
 
   @Get()
