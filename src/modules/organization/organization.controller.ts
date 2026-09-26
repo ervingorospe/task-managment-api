@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -43,12 +44,19 @@ export class OrganizationController {
   // ownerId would let anyone create an organization "owned by" any user
   // id they choose. No permission gate beyond "logged in" — creating an
   // org is how someone becomes a member of anything in the first place,
-  // so it can't itself depend on already holding a rule somewhere.
+  // so it can't itself depend on already holding a rule somewhere. The one
+  // exception: an account that only exists because it accepted an invite
+  // (never signed up on its own) can never create an organization either.
   @Post()
   createOrganization(
     @Body() dto: CreateOrganizationDto,
     @CurrentUser() user: RequestUser,
   ) {
+    if (user.createdViaInvite) {
+      throw new ForbiddenException(
+        'An account created from an invite cannot create an organization.',
+      );
+    }
     return this.organizationService.create(dto, user.id);
   }
 

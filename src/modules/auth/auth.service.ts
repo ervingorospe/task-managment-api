@@ -283,6 +283,7 @@ export class AuthService {
           passwordHash,
           isVerified: true,
           hasOnboarded: true,
+          createdViaInvite: true,
         },
       });
     }
@@ -366,6 +367,7 @@ export class AuthService {
             googleId: profile.googleId,
             isVerified: true,
             hasOnboarded: true,
+            createdViaInvite: true,
           },
         });
         await this.acceptInviteForNewUser(invite, user);

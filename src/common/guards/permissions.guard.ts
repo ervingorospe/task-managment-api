@@ -20,6 +20,7 @@ export interface RequestUser {
   id: number;
   email: string;
   isVerified: boolean;
+  createdViaInvite: boolean;
 }
 
 type AuthenticatedRequest = Request & { user?: RequestUser };

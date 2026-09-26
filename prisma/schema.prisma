@@ -49,6 +49,12 @@ model User {
   isVerified   Boolean @default(false)
   hasOnboarded Boolean @default(false)
 
+  // True only for an account first created by accepting an org invite
+  // (never signed up directly) — such an account can't ever have owned an
+  // organization on its own, so it's barred from creating one or deleting
+  // itself (see organization.controller.ts / user.service.ts).
+  createdViaInvite Boolean @default(false)
+
   // Email verification — a single in-flight token per user (no separate
   // table needed, only one verification purpose exists today).
   verificationToken       String?   @unique

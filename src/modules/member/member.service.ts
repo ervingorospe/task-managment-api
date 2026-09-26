@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { SesService } from '../email/ses.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
 import {
@@ -130,7 +131,7 @@ export class MemberService {
         orderBy,
         skip: (page - 1) * limit,
         take: limit,
-        include: { user: true, role: true },
+        include: { user: { select: PUBLIC_USER_SELECT }, role: true },
       }),
       this.prisma.member.count({ where }),
     ]);

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { S3Service } from '../storage/s3.service';
 import { SesService } from '../email/ses.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
@@ -264,7 +265,7 @@ export class OrganizationService {
     const organization = await tx.organization.findFirst({
       where,
       include: {
-        owner: true,
+        owner: { select: PUBLIC_USER_SELECT },
         settings: true,
         capacity: true,
         roles: {
@@ -281,7 +282,10 @@ export class OrganizationService {
           // role needs its rules nested — this is what usePermission() on
           // the frontend checks after login, and an empty rules array
           // silently makes every permission check fail rather than error.
-          include: { user: true, role: { include: { rules: true } } },
+          include: {
+            user: { select: PUBLIC_USER_SELECT },
+            role: { include: { rules: true } },
+          },
         },
         // EXPIRED (not just PENDING) so an invite that just aged out stays
         // visible in the pending-invitations list with that state, instead

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { PermissionsService } from '../../common/permissions/permissions.service';
 import {
   PERMISSIONS,
@@ -43,7 +44,7 @@ export class TicketRequestService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
-        include: { client: { include: { user: true } } },
+        include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } } },
       }),
       this.prisma.ticketRequest.count({ where }),
     ]);
@@ -61,14 +62,14 @@ export class TicketRequestService {
     return this.prisma.ticketRequest.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { client: { include: { user: true } } },
+      include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } } },
     });
   }
 
   async details(requestId: number) {
     const request = await this.prisma.ticketRequest.findFirst({
       where: { id: requestId, isDeleted: false },
-      include: { client: { include: { user: true } }, attachments: true },
+      include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
     });
     if (!request) throw new NotFoundException('Request not found.');
     return request;
@@ -121,7 +122,7 @@ export class TicketRequestService {
             ? { create: dto.attachments }
             : undefined,
         },
-        include: { client: { include: { user: true } }, attachments: true },
+        include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
       });
     });
   }
@@ -138,7 +139,7 @@ export class TicketRequestService {
     return this.prisma.ticketRequest.update({
       where: { id: request.id },
       data: { title: dto.title, description: dto.description },
-      include: { client: { include: { user: true } }, attachments: true },
+      include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
     });
   }
 
@@ -150,7 +151,7 @@ export class TicketRequestService {
       // Same fix as approve() below — without this the response has no
       // `client`, which throws in the frontend's adaptTicketRequest() and
       // shows a false "failed to reject" even though it succeeded.
-      include: { client: { include: { user: true } }, attachments: true },
+      include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
     });
   }
 
@@ -166,7 +167,7 @@ export class TicketRequestService {
     return this.prisma.ticketRequest.update({
       where: { id: request.id },
       data: { status: 'CANCELLED' },
-      include: { client: { include: { user: true } }, attachments: true },
+      include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
     });
   }
 
@@ -212,8 +213,8 @@ export class TicketRequestService {
             },
             include: {
               tag: true,
-              client: { include: { user: true } },
-              assignees: { include: { user: true } },
+              client: { include: { user: { select: PUBLIC_USER_SELECT } } },
+              assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
               attachments: true,
             },
           });
@@ -226,7 +227,7 @@ export class TicketRequestService {
             // has no `client`, which throws when adaptMember(r.client)
             // reads it and silently surfaces as a false "failed to
             // approve" even though the DB write succeeded.
-            include: { client: { include: { user: true } }, attachments: true },
+            include: { client: { include: { user: { select: PUBLIC_USER_SELECT } } }, attachments: true },
           });
 
           return { request: updatedRequest, ticket };

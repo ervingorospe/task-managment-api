@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
+  HttpCode,
   Param,
   ParseFilePipe,
   ParseIntPipe,
@@ -14,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { UserService } from './user.service';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { RequestUser } from '../../common/guards/permissions.guard';
 
@@ -40,6 +43,29 @@ export class UserController {
   ) {
     this.assertSelf(userId, user);
     return this.userService.update(userId, dto);
+  }
+
+  @Patch(':userId/password')
+  @HttpCode(200)
+  async changePassword(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    this.assertSelf(userId, user);
+    await this.userService.changePassword(userId, dto);
+    return { message: 'Password updated.' };
+  }
+
+  @Delete(':userId')
+  @HttpCode(200)
+  async deleteAccount(
+    @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    this.assertSelf(userId, user);
+    await this.userService.deleteAccount(userId);
+    return { message: 'Account deleted.' };
   }
 
   @Post(':userId/avatar')
