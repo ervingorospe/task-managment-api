@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -21,10 +22,12 @@ class AttachmentDto {
 
 export class CreateTicketDto {
   @IsString()
+  @MaxLength(150)
   title!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   description?: string;
 
   @IsInt()

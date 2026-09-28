@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -23,10 +24,12 @@ class AttachmentDto {
  * has no org, so no Member rows exist to reference. */
 export class CreatePersonalTicketDto {
   @IsString()
+  @MaxLength(150)
   title!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   description?: string;
 
   @IsInt()

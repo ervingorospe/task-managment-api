@@ -2,6 +2,7 @@ import {
   IsDateString,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateIf,
 } from 'class-validator';
 
@@ -13,10 +14,12 @@ import {
 export class UpdateTicketDto {
   @IsOptional()
   @IsString()
+  @MaxLength(150)
   title?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   description?: string;
 
   @IsOptional()

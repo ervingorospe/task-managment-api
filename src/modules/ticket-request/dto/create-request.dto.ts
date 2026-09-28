@@ -4,6 +4,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 
@@ -25,10 +26,12 @@ export class CreateRequestDto {
   clientId!: number;
 
   @IsString()
+  @MaxLength(150)
   title!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(10000)
   description?: string;
 
   @IsOptional()
