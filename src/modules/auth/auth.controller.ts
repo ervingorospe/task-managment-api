@@ -12,6 +12,8 @@ import {
   Req,
   Res,
   UseGuards,
+  Version,
+  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
@@ -95,8 +97,15 @@ export class AuthController {
     return this.userService.findByIdWithMemberships(userId);
   }
 
+  // Version-neutral (always /auth/google[/callback], never /v1/auth/...):
+  // the callback URL is registered as a fixed, exact string in Google
+  // Cloud Console (GOOGLE_CALLBACK_URL) — versioning it out from under
+  // that registration would break Google sign-in until someone manually
+  // updates the console entry to match. Kept alongside the initiating
+  // route so the whole flow stays on one stable, unversioned path pair.
   @Public()
   @Get('google')
+  @Version(VERSION_NEUTRAL)
   @UseGuards(AuthGuard('google'))
   googleLogin() {
     // Handled entirely by the Passport strategy — it redirects to Google.
@@ -104,6 +113,7 @@ export class AuthController {
 
   @Public()
   @Get('google/callback')
+  @Version(VERSION_NEUTRAL)
   @UseGuards(AuthGuard('google'))
   async googleCallback(
     @Req() req: Request & { user: GoogleProfile },

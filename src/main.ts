@@ -1,11 +1,21 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Every route gets a /v1 prefix unless it opts out with
+  // @Version(VERSION_NEUTRAL) — used sparingly, only for routes an
+  // external system references by a fixed URL it isn't safe to
+  // version out from under (see auth.controller.ts's Google OAuth
+  // routes, whose callback URL is registered in Google Cloud Console).
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: '1',
+  });
 
   // Real auth now exists — the session cookie is httpOnly and cross-origin
   // (frontend and backend are different domains), so `credentials: true`
