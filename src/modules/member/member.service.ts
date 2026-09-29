@@ -9,6 +9,8 @@ import {
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
+import { assertCapacity } from '../../common/helper/assert-capacity.helper';
+import { resolveActingMemberId } from '../../common/helper/resolve-acting-member.helper';
 import { SesService } from '../email/ses.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
 import {
@@ -147,7 +149,13 @@ export class MemberService {
     });
   }
 
-  async invite(orgId: number, dto: InviteMemberDto) {
+  async invite(orgId: number, dto: InviteMemberDto, actingUserId: number) {
+    const invitedBy = await resolveActingMemberId(
+      this.prisma,
+      orgId,
+      actingUserId,
+    );
+
     // So a previous invite to this same email that's actually past its
     // expiry (but hasn't been read/swept since) doesn't wrongly block a
     // fresh invite with "already has a pending invitation."
@@ -160,6 +168,24 @@ export class MemberService {
       throw new ConflictException(
         'This email already has a pending invitation.',
       );
+
+    // A pending invite reserves a seat before it's ever accepted, so it
+    // counts toward the member limit right alongside already-active
+    // members — otherwise an org could invite far more people than its
+    // capacity the moment those invites are sent, not just once accepted.
+    const [activeMemberCount, pendingInviteCount] = await Promise.all([
+      this.prisma.member.count({ where: { orgId, isDeleted: false } }),
+      this.prisma.memberInvite.count({
+        where: { orgId, status: 'PENDING', isDeleted: false },
+      }),
+    ]);
+    await assertCapacity(
+      this.prisma,
+      orgId,
+      'members',
+      activeMemberCount + pendingInviteCount,
+      'Member',
+    );
 
     const settings = await this.prisma.organizationSettings.findUnique({
       where: { orgId },
@@ -180,15 +206,28 @@ export class MemberService {
     );
 
     return this.prisma.memberInvite.create({
-      data: { orgId, email: dto.email, roleId: dto.roleId, expiry, token },
+      data: {
+        orgId,
+        email: dto.email,
+        roleId: dto.roleId,
+        expiry,
+        token,
+        invitedBy,
+      },
     });
   }
 
-  async resend(inviteId: number) {
+  async resend(inviteId: number, actingUserId: number) {
     const invite = await this.prisma.memberInvite.findFirst({
       where: { id: inviteId, isDeleted: false },
     });
     if (!invite) throw new NotFoundException('Invite not found.');
+
+    const resentBy = await resolveActingMemberId(
+      this.prisma,
+      invite.orgId,
+      actingUserId,
+    );
 
     const isPastExpiry = invite.expiry != null && invite.expiry < new Date();
     if (invite.status !== 'PENDING' || isPastExpiry) {
@@ -240,6 +279,7 @@ export class MemberService {
         lastSentAt: new Date(),
         expiry,
         token,
+        resentBy,
       },
     });
   }

@@ -9,6 +9,7 @@ import { S3Service } from '../storage/s3.service';
 import { formatReferenceId } from '../../common/helper/reference-id.helper';
 import { retryOnUniqueConflict } from '../../common/helper/retry-on-conflict.helper';
 import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
+import { assertCapacity } from '../../common/helper/assert-capacity.helper';
 import type { TicketQueryDto } from './dto/ticket-query.dto';
 import type { CountNumbersQueryDto } from './dto/count-numbers-query.dto';
 import type { CreateTicketDto } from './dto/create-ticket.dto';
@@ -302,6 +303,14 @@ export class TicketService {
   private async createTicket(orgId: number, dto: CreateTicketDto) {
     const existingCount = await this.prisma.ticket.count({ where: { orgId } });
     const referenceId = formatReferenceId('tckt', existingCount);
+
+    // existingCount above deliberately includes soft-deleted tickets (it's
+    // just numbering the next reference id) — capacity cares about how
+    // many are actually active right now, a different count.
+    const activeCount = await this.prisma.ticket.count({
+      where: { orgId, isDeleted: false },
+    });
+    await assertCapacity(this.prisma, orgId, 'tickets', activeCount, 'Ticket');
 
     return this.prisma.ticket.create({
       data: {

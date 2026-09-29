@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertCapacity } from '../../common/helper/assert-capacity.helper';
 import type { AddTagDto } from './dto/add-tag.dto';
 import type { UpdateTagDto } from './dto/update-tag.dto';
 
@@ -25,6 +26,13 @@ export class TagService {
     });
     if (activeClash)
       throw new ConflictException('A tag with this name already exists.');
+
+    // Applies whether this ends up reviving a soft-deleted tag or creating
+    // a brand new one — both result in one more active tag either way.
+    const activeCount = await this.prisma.tag.count({
+      where: { orgId, isDeleted: false },
+    });
+    await assertCapacity(this.prisma, orgId, 'tags', activeCount, 'Tag');
 
     // Reuse a soft-deleted tag with the same name instead of inserting a
     // second row for it.

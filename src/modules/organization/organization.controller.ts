@@ -197,8 +197,13 @@ export class OrganizationController {
   requestOwnershipTransfer(
     @Param('orgId', ParseIntPipe) orgId: number,
     @Body() dto: RequestOwnershipTransferDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.organizationService.requestOwnershipTransfer(orgId, dto);
+    return this.organizationService.requestOwnershipTransfer(
+      orgId,
+      dto,
+      user.id,
+    );
   }
 
   @RequirePermissions({

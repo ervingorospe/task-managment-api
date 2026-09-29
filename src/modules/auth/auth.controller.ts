@@ -27,6 +27,7 @@ import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { DeclineInviteDto } from './dto/decline-invite.dto';
 import { AUTH_COOKIE_NAME } from './auth.constants';
 import {
   getAuthCookieOptions,
@@ -209,6 +210,15 @@ export class AuthController {
       getAuthCookieOptions(),
     );
     return this.userService.findByIdWithMemberships(userId);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Public()
+  @Post('decline-invite')
+  @HttpCode(200)
+  async declineInvite(@Body() dto: DeclineInviteDto) {
+    await this.authService.declineInvite(dto);
+    return { message: 'Invite declined.' };
   }
 
   @Post('logout')

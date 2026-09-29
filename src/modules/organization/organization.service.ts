@@ -14,6 +14,7 @@ import { renderMemberInviteEmail } from '../email/templates/member-invite.templa
 import { computeInviteExpiry } from '../../common/helper/invite-expiration.helper';
 import { baseSlug } from '../../common/helper/slug.helper';
 import { retryOnUniqueConflict } from '../../common/helper/retry-on-conflict.helper';
+import { resolveActingMemberId } from '../../common/helper/resolve-acting-member.helper';
 import type { CreateOrganizationDto } from './dto/create-organization.dto';
 import type { UpdateOrgBasicInfoDto } from './dto/update-org-basic-info.dto';
 import type { UpdateOrgTimezoneDto } from './dto/update-org-timezone.dto';
@@ -148,7 +149,7 @@ export class OrganizationService {
         throw new BadRequestException('roles must include a Superadmin role.');
       }
 
-      await tx.member.create({
+      const ownerMember = await tx.member.create({
         data: {
           orgId: organization.id,
           userId: owner.id,
@@ -226,6 +227,7 @@ export class OrganizationService {
             email: inviteDto.email,
             expiry,
             token,
+            invitedBy: ownerMember.id,
           },
         });
       }
@@ -478,8 +480,14 @@ export class OrganizationService {
   async requestOwnershipTransfer(
     orgId: number,
     dto: RequestOwnershipTransferDto,
+    actingUserId: number,
   ) {
     await this.findActiveOrThrow(orgId);
+    const invitedBy = await resolveActingMemberId(
+      this.prisma,
+      orgId,
+      actingUserId,
+    );
 
     // Only an existing pending OWNERSHIP invite should block this — a
     // pending MEMBERSHIP invite (very common; any org with an open invite
@@ -506,6 +514,7 @@ export class OrganizationService {
         roleId: superadminRole.id,
         email: dto.email,
         type: 'OWNERSHIP',
+        invitedBy,
       },
     });
   }

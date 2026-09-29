@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertCapacity } from '../../common/helper/assert-capacity.helper';
 import type { CreateRoleDto } from './dto/create-role.dto';
 import type { UpdateRoleRulesDto } from './dto/update-role-rules.dto';
 import type { UpdateRoleInfoDto } from './dto/update-role-info.dto';
@@ -43,6 +44,13 @@ export class RoleService {
     if (activeClash) {
       throw new ConflictException('A role with this name already exists.');
     }
+
+    // Applies whether this ends up reviving a soft-deleted role or
+    // creating a brand new one — both result in one more active role.
+    const activeCount = await this.prisma.role.count({
+      where: { orgId, isDeleted: false },
+    });
+    await assertCapacity(this.prisma, orgId, 'roles', activeCount, 'Role');
 
     if (existingDeleted) {
       return this.prisma.role.update({

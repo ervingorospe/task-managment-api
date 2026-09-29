@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -96,17 +97,27 @@ export class CreateOrganizationDto {
   @IsTimeZone()
   timezone!: string;
 
+  // These three ceilings mirror OrganizationCapacity's schema defaults
+  // (roles: 10, tags: 20, members: 20) — the capacity row itself doesn't
+  // exist until after this same request creates it, so there's nothing in
+  // the database yet to check the submitted arrays against. A fixed
+  // constant here is the one-time equivalent of the runtime
+  // assertCapacity() check every later add-role/add-tag/invite-member
+  // call goes through once the org (and its capacity row) actually exist.
   @IsArray()
+  @ArrayMaxSize(10)
   @ValidateNested({ each: true })
   @Type(() => OrgRoleDto)
   roles!: OrgRoleDto[];
 
   @IsArray()
+  @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => OrgInviteDto)
   invites!: OrgInviteDto[];
 
   @IsArray()
+  @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => OrgTagDto)
   tags!: OrgTagDto[];

@@ -226,6 +226,8 @@ model Member {
   clientTickets   Ticket[]        @relation("TicketClient")
   assignedTickets Ticket[]        @relation("TicketAssignees")
   clientRequests  TicketRequest[] @relation("RequestClient")
+  invitesSent     MemberInvite[]  @relation("InviteInvitedBy")
+  invitesResent   MemberInvite[]  @relation("InviteResentBy")
 
   @@index([orgId, isDeleted])
   @@index([userId])
@@ -240,6 +242,7 @@ enum InviteType {
 enum InviteStatus {
   PENDING
   ACCEPTED
+  REJECTED
   EXPIRED
   CANCELLED
 }
@@ -248,6 +251,8 @@ model MemberInvite {
   id          Int          @id @default(autoincrement())
   orgId       Int
   roleId      Int
+  invitedBy   Int
+  resentBy    Int?
   email       String
   token       String?      @unique
   expiry      DateTime?
@@ -259,8 +264,10 @@ model MemberInvite {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  role         Role         @relation(fields: [roleId], references: [id])
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  role            Role         @relation(fields: [roleId], references: [id])
+  invitedByMember Member       @relation("InviteInvitedBy", fields: [invitedBy], references: [id])
+  resentByMember  Member?      @relation("InviteResentBy", fields: [resentBy], references: [id], onDelete: SetNull)
 
   @@index([orgId, isDeleted])
   @@map("member_invites")

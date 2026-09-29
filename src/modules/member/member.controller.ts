@@ -16,6 +16,8 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { UpdateMemberActiveStateDto } from './dto/update-member-active-state.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { RequestUser } from '../../common/guards/permissions.guard';
 import { PERMISSIONS } from '../../common/permissions/permissions.constant';
 
 @Controller('members')
@@ -45,8 +47,9 @@ export class MemberController {
   invite(
     @Query('orgId', ParseIntPipe) orgId: number,
     @Body() dto: InviteMemberDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.memberService.invite(orgId, dto);
+    return this.memberService.invite(orgId, dto, user.id);
   }
 
   @RequirePermissions({
@@ -54,8 +57,11 @@ export class MemberController {
     resource: 'memberInvite.inviteId',
   })
   @Post('invites/:inviteId/resend')
-  resend(@Param('inviteId', ParseIntPipe) inviteId: number) {
-    return this.memberService.resend(inviteId);
+  resend(
+    @Param('inviteId', ParseIntPipe) inviteId: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.memberService.resend(inviteId, user.id);
   }
 
   @RequirePermissions({

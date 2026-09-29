@@ -13,6 +13,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SesService } from '../email/ses.service';
 import { renderVerifyEmail } from '../email/templates/verify-email.template';
+import { renderInviteResponseEmail } from '../email/templates/invite-response.template';
 import {
   VERIFICATION_RESEND_COOLDOWN_MS,
   VERIFICATION_TOKEN_TTL_MS,
@@ -20,6 +21,7 @@ import {
 import type { SignupDto } from './dto/signup.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { AcceptInviteDto } from './dto/accept-invite.dto';
+import type { DeclineInviteDto } from './dto/decline-invite.dto';
 import type { GoogleProfile } from './strategies/google.strategy';
 
 const BCRYPT_ROUNDS = 10;
@@ -211,7 +213,12 @@ export class AuthService {
   private async findValidInviteByToken(token: string) {
     const invite = await this.prisma.memberInvite.findFirst({
       where: { token, type: 'MEMBERSHIP', isDeleted: false },
-      include: { organization: true, role: true },
+      include: {
+        organization: { include: { owner: true } },
+        role: true,
+        invitedByMember: true,
+        resentByMember: true,
+      },
     });
     if (!invite) {
       throw new BadRequestException('Invalid or already-used invite link.');
@@ -223,6 +230,51 @@ export class AuthService {
       throw new BadRequestException('This invite has expired.');
     }
     return invite;
+  }
+
+  /** Best-effort notification — the invite's ACCEPTED/REJECTED outcome is
+   * already final by the time this runs, so a failed send here logs and
+   * moves on rather than failing the response itself (unlike
+   * sendInviteEmail/sendVerificationEmail, where a failed send means
+   * nothing should be persisted at all). Recipients are deduped by email:
+   * the org owner, whoever sent the invite, and whoever resent it (if
+   * anyone) are often the same person wearing multiple hats. */
+  private async notifyInviteResponse(
+    invite: {
+      organization: { organizationName: string; owner: { email: string } };
+      role: { roleName: string };
+      invitedByMember: { email: string };
+      resentByMember: { email: string } | null;
+    },
+    invitee: { name: string; email: string },
+    status: 'ACCEPTED' | 'REJECTED',
+  ): Promise<void> {
+    const recipients = new Map<string, string>();
+    const add = (email: string) => recipients.set(email.toLowerCase(), email);
+    add(invite.organization.owner.email);
+    add(invite.invitedByMember.email);
+    if (invite.resentByMember) add(invite.resentByMember.email);
+
+    const { subject, html, text } = renderInviteResponseEmail({
+      organizationName: invite.organization.organizationName,
+      inviteeName: invitee.name || invitee.email,
+      inviteeEmail: invitee.email,
+      roleName: invite.role.roleName,
+      status,
+    });
+
+    await Promise.all(
+      Array.from(recipients.values()).map(async (to) => {
+        try {
+          await this.ses.send({ to, subject, html, text });
+        } catch (error) {
+          this.logger.warn(
+            `Failed to send invite-response email to ${to}`,
+            error instanceof Error ? error.stack : undefined,
+          );
+        }
+      }),
+    );
   }
 
   /** What the accept-invite page needs to render itself. `requiresPassword`
@@ -307,7 +359,31 @@ export class AuthService {
       });
     }
 
+    await this.notifyInviteResponse(
+      invite,
+      { name: `${user.firstName} ${user.lastName}`.trim(), email: user.email },
+      'ACCEPTED',
+    );
+
     return user.id;
+  }
+
+  /** Never sends a verification email or issues a session — declining
+   * doesn't create or log into an account, it just closes out the invite
+   * and tells the people who sent it. */
+  async declineInvite(dto: DeclineInviteDto): Promise<void> {
+    const invite = await this.findValidInviteByToken(dto.token);
+
+    await this.prisma.memberInvite.update({
+      where: { id: invite.id },
+      data: { status: 'REJECTED' },
+    });
+
+    await this.notifyInviteResponse(
+      invite,
+      { name: '', email: invite.email },
+      'REJECTED',
+    );
   }
 
   /** Fallback display name for a Gmail-linked account accepted without
