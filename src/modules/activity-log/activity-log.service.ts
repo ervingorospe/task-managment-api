@@ -1,20 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationEventsService } from './notification-events.service';
 import type { LogActivityDto } from './dto/log-activity.dto';
 import type { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import type { PersonalActivityLogQueryDto } from './dto/personal-activity-log-query.dto';
 
 @Injectable()
 export class ActivityLogService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationEvents: NotificationEventsService,
+  ) {}
 
   /**
    * Standalone table — no foreign keys, no joins. Everything here is a
    * plain copy captured at write time (see schema.prisma's header note and
    * the frontend's lib/helper/activity-access.ts for the same rule).
    */
-  log(dto: LogActivityDto) {
-    return this.prisma.activityLogEntry.create({ data: dto });
+  async log(dto: LogActivityDto) {
+    const entry = await this.prisma.activityLogEntry.create({ data: dto });
+
+    // Same audience and exclusion rule as getNotifications() below — every
+    // involved user except whoever just did this, so the bell's SSE stream
+    // and its REST query never disagree about who gets notified.
+    if (entry.module === 'TICKET') {
+      for (const userId of entry.involvedUserIds) {
+        if (userId !== entry.actorId) this.notificationEvents.notify(userId);
+      }
+    }
+
+    return entry;
   }
 
   async list(query: ActivityLogQueryDto) {
@@ -73,5 +88,54 @@ export class ActivityLogService {
     ]);
 
     return { items, total, page, limit };
+  }
+
+  /** The bell icon's feed — ticket activity that involves this user, across
+   * every org they currently belong to, excluding their own actions (you
+   * don't need to be told about something you just did yourself).
+   * `unreadCount` is everything newer than their notificationsSeenAt
+   * cursor (see schema.prisma's doc comment on that field); `items` is
+   * just the most recent slice, read or not, so the dropdown still shows
+   * something right after it's been marked seen. */
+  async getNotifications(userId: number) {
+    const [orgIds, user] = await Promise.all([
+      this.prisma.member
+        .findMany({
+          where: { userId, isActive: true, isDeleted: false },
+          select: { orgId: true },
+        })
+        .then((rows) => rows.map((r) => r.orgId)),
+      this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { notificationsSeenAt: true },
+      }),
+    ]);
+
+    const where = {
+      module: 'TICKET' as const,
+      orgId: { in: orgIds },
+      involvedUserIds: { has: userId },
+      actorId: { not: userId },
+    };
+
+    const [items, unreadCount] = await Promise.all([
+      this.prisma.activityLogEntry.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
+      this.prisma.activityLogEntry.count({
+        where: { ...where, createdAt: { gt: user.notificationsSeenAt } },
+      }),
+    ]);
+
+    return { items, unreadCount };
+  }
+
+  async markNotificationsSeen(userId: number): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { notificationsSeenAt: new Date() },
+    });
   }
 }
