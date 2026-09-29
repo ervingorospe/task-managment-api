@@ -55,6 +55,15 @@ model User {
   // itself (see organization.controller.ts / user.service.ts).
   createdViaInvite Boolean @default(false)
 
+  // Single "last opened the notification bell" cursor — an
+  // ActivityLogEntry newer than this, that involves this user, counts as
+  // unread (see activity-log.service.ts's getNotifications). Deliberately
+  // not per-notification read state: one cursor is enough to drive a
+  // bell-icon unread count without a second table. Defaults to "now" (not
+  // null) so a brand-new/existing user isn't instantly flooded with every
+  // historical entry as unread the first time they load the app.
+  notificationsSeenAt DateTime @default(now())
+
   // Email verification — a single in-flight token per user (no separate
   // table needed, only one verification purpose exists today).
   verificationToken       String?   @unique
@@ -433,6 +442,11 @@ model ActivityLogEntry {
   @@index([orgId, module])
   // Personal-ticket activity queries (orgId null) scope by actorId instead.
   @@index([actorId])
+  // The notification bell's `involvedUserIds has userId` filter — a plain
+  // B-tree can't accelerate an array-contains check. Uses Postgres core's
+  // built-in array_ops GIN opclass (no extension needed, unlike the
+  // trigram indexes on Ticket's title/referenceId, which need pg_trgm).
+  @@index([involvedUserIds], type: Gin)
   @@map("activity_log_entries")
 }
 
