@@ -185,22 +185,49 @@ export class AuthService {
   }
 
   /** Turns a pending invite into a real Member row for a just-created
-   * user, and marks the invite consumed. */
+   * user, and marks the invite consumed. If this org already has a Member
+   * row for this email — e.g. they were removed (remove() soft-deletes and
+   * clears userId, see member.service.ts) and are now being invited back —
+   * that row is revived instead of inserting a second one, same
+   * "revive, don't duplicate" rule role.service.ts/tag.service.ts already
+   * apply to their own soft-deleted rows. Matched by email (not userId)
+   * since remove() clears userId on the way out. */
   private async acceptInviteForNewUser(
     invite: { id: number; orgId: number; roleId: number },
     user: { id: number; firstName: string; lastName: string; email: string },
   ) {
+    const existingMember = await this.prisma.member.findFirst({
+      where: {
+        orgId: invite.orgId,
+        email: { equals: user.email, mode: 'insensitive' },
+      },
+      orderBy: { id: 'desc' },
+    });
+
     await this.prisma.$transaction([
-      this.prisma.member.create({
-        data: {
-          orgId: invite.orgId,
-          userId: user.id,
-          roleId: invite.roleId,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          email: user.email,
-        },
-      }),
+      existingMember
+        ? this.prisma.member.update({
+            where: { id: existingMember.id },
+            data: {
+              userId: user.id,
+              roleId: invite.roleId,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+              isDeleted: false,
+              isActive: true,
+            },
+          })
+        : this.prisma.member.create({
+            data: {
+              orgId: invite.orgId,
+              userId: user.id,
+              roleId: invite.roleId,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+            },
+          }),
       this.prisma.memberInvite.update({
         where: { id: invite.id },
         data: { status: 'ACCEPTED' },

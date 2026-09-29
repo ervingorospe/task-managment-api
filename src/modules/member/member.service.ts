@@ -324,13 +324,20 @@ export class MemberService {
 
       // "remove in users table, soft delete in members table" — the member
       // row stays (its firstName/lastName/email snapshot survives for
-      // history), but the account behind it is deactivated. Not a hard
-      // delete: the same user may still be a member of other organizations.
+      // history), but the account behind it is deactivated too. Only when
+      // this was their last active membership anywhere, though — the same
+      // user may still be a member of other organizations, and removing
+      // them from just this one shouldn't lock them out of those too.
       if (member.userId) {
-        await tx.user.update({
-          where: { id: member.userId },
-          data: { isDeleted: true, isActive: false },
+        const remainingMemberships = await tx.member.count({
+          where: { userId: member.userId, isDeleted: false },
         });
+        if (remainingMemberships === 0) {
+          await tx.user.update({
+            where: { id: member.userId },
+            data: { isDeleted: true, isActive: false },
+          });
+        }
       }
     });
   }
