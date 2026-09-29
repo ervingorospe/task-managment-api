@@ -29,6 +29,13 @@ export const PERMISSIONS = {
   TAG_UPDATE: 'tag.update',
   TAG_REMOVE: 'tag.remove',
 
+  // Project Rules
+  PROJECT_VIEW: 'project.view',
+  PROJECT_VIEW_OWN: 'project.view.own',
+  PROJECT_ADD: 'project.add',
+  PROJECT_UPDATE: 'project.update',
+  PROJECT_REMOVE: 'project.remove',
+
   // Member Rules
   MEMBER_INVITE: 'member.invite',
   MEMBER_REMOVE: 'member.remove',

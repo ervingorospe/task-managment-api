@@ -1,7 +1,14 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 
-const MODULES = ['TICKET', 'REQUEST', 'MEMBER', 'ROLE', 'TAG'] as const;
+const MODULES = [
+  'TICKET',
+  'REQUEST',
+  'MEMBER',
+  'ROLE',
+  'TAG',
+  'PROJECT',
+] as const;
 
 export class LogActivityDto {
   // Absent for a personal (org-less) ticket's activity — the owner is

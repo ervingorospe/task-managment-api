@@ -38,6 +38,10 @@ export class CreateTicketDto {
   clientId?: number;
 
   @IsOptional()
+  @IsInt()
+  projectId?: number;
+
+  @IsOptional()
   @IsArray()
   @Type(() => Number)
   @IsInt({ each: true })

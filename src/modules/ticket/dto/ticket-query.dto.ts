@@ -35,6 +35,11 @@ export class TicketQueryDto extends PaginationQueryDto {
   @IsArray()
   memberIds?: number[];
 
+  @IsOptional()
+  @Transform(toIntArray)
+  @IsArray()
+  projectIds?: number[];
+
   /** Due-date range — matches the frontend's ticket filter panel. */
   @IsOptional()
   @IsString()

@@ -13,6 +13,7 @@ const prisma = new PrismaClient({
 const CATEGORIES = [
   'Organization',
   'Tag',
+  'Project',
   'Member',
   'Role',
   'Ticket',
@@ -105,6 +106,37 @@ const RULES: {
     name: 'Remove Tags',
     desc: 'Can delete a tag from the organization.',
     category: 'Tag',
+  },
+
+  {
+    action: 'project.view',
+    name: 'View All Projects',
+    desc: 'Can view every project in the organization.',
+    category: 'Project',
+  },
+  {
+    action: 'project.view.own',
+    name: 'View Assigned Projects',
+    desc: 'Can only view projects they are assigned to.',
+    category: 'Project',
+  },
+  {
+    action: 'project.add',
+    name: 'Add Projects',
+    desc: 'Can create a new project for the organization.',
+    category: 'Project',
+  },
+  {
+    action: 'project.update',
+    name: 'Update Projects',
+    desc: "Can edit a project's name or description.",
+    category: 'Project',
+  },
+  {
+    action: 'project.remove',
+    name: 'Remove Projects',
+    desc: 'Can delete a project from the organization.',
+    category: 'Project',
   },
 
   {
@@ -466,6 +498,7 @@ async function main() {
     'ticket.comment',
     'ticket.edit.comment',
     'ticket.remove.comment',
+    'project.view.own',
     'organization.create',
     'activity.log.view.included',
     'report.view.own',
@@ -473,7 +506,7 @@ async function main() {
 
   await upsertGlobalRole(
     'Admin',
-    'Can manage members, tags, and reports, and has full visibility across all tickets.',
+    'Can manage members, tags, projects, and reports, and has full visibility across all tickets.',
     [
       'request.all.create',
       'request.all.cancel',
@@ -487,6 +520,10 @@ async function main() {
       'tag.add',
       'tag.update',
       'tag.remove',
+      'project.view',
+      'project.add',
+      'project.update',
+      'project.remove',
       'member.view.client',
       'member.set.active',
       'member.view.owner',

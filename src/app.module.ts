@@ -9,6 +9,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { OrganizationModule } from './modules/organization/organization.module';
 import { RoleModule } from './modules/role/role.module';
 import { TagModule } from './modules/tag/tag.module';
+import { ProjectModule } from './modules/project/project.module';
 import { MemberModule } from './modules/member/member.module';
 import { TicketModule } from './modules/ticket/ticket.module';
 import { TicketRequestModule } from './modules/ticket-request/ticket-request.module';
@@ -37,6 +38,7 @@ import { PermissionsModule } from './common/permissions/permissions.module';
     OrganizationModule,
     RoleModule,
     TagModule,
+    ProjectModule,
     MemberModule,
     TicketModule,
     TicketRequestModule,

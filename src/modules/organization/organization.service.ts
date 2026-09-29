@@ -279,6 +279,13 @@ export class OrganizationService {
         // pipeline (Backlog → To Do → In-Progress → Done), and insertion
         // order preserves that; alphabetical would scramble it.
         tags: { where: { isDeleted: false } },
+        // Not included here, unlike roles/tags/members — a project's
+        // visibility depends on the caller's rules (project.view sees
+        // everything, project.view.own only sees what they're assigned
+        // to), which this shared, unscoped bundle has no caller identity
+        // to resolve against. The frontend fetches GET /projects
+        // separately instead (see lib/api/organizations.ts), same as it
+        // already does for tickets/ticketRequests for the same reason.
         members: {
           where: { isDeleted: false },
           // role needs its rules nested — this is what usePermission() on

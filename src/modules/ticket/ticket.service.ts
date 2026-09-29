@@ -25,6 +25,7 @@ import type { CreatePersonalTicketDto } from './dto/create-personal-ticket.dto';
 
 const TICKET_MUTATION_INCLUDE = {
   tag: true,
+  project: true,
   client: { include: { user: { select: PUBLIC_USER_SELECT } } },
   assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
 } as const;
@@ -79,6 +80,9 @@ export class TicketService {
       query.filterBy,
       query.involvesUserId,
     );
+    if (query.projectIds?.length) {
+      where.projectId = { in: query.projectIds };
+    }
     return this.countNumbersForWhere(where, query, { orgId: query.orgId });
   }
 
@@ -155,6 +159,7 @@ export class TicketService {
       orderBy: { createdAt: 'desc' },
       include: {
         tag: true,
+        project: true,
         client: { include: { user: { select: PUBLIC_USER_SELECT } } },
         assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
       },
@@ -183,7 +188,7 @@ export class TicketService {
         where: { orgId, isDeleted: false },
         orderBy: { createdAt: 'desc' },
         take: 5,
-        include: { tag: true },
+        include: { tag: true, project: true },
       }),
       this.prisma.ticketRequest.findMany({
         where: { orgId, isDeleted: false },
@@ -202,6 +207,9 @@ export class TicketService {
     );
     if (query.memberIds?.length) {
       where.assignees = { some: { id: { in: query.memberIds } } };
+    }
+    if (query.projectIds?.length) {
+      where.projectId = { in: query.projectIds };
     }
     return this.listForWhere(where, query);
   }
@@ -262,6 +270,7 @@ export class TicketService {
         take: limit,
         include: {
           tag: true,
+          project: true,
           client: { include: { user: { select: PUBLIC_USER_SELECT } } },
           assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
           attachments: true,
@@ -278,6 +287,7 @@ export class TicketService {
       where: { id: ticketId, isDeleted: false },
       include: {
         tag: true,
+        project: true,
         client: { include: { user: { select: PUBLIC_USER_SELECT } } },
         assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
         attachments: true,
@@ -320,6 +330,7 @@ export class TicketService {
         description: dto.description,
         tagId: dto.tagId,
         clientId: dto.clientId,
+        projectId: dto.projectId,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         assignees: dto.assigneeIds
           ? { connect: dto.assigneeIds.map((id) => ({ id })) }
@@ -328,6 +339,7 @@ export class TicketService {
       },
       include: {
         tag: true,
+        project: true,
         client: { include: { user: { select: PUBLIC_USER_SELECT } } },
         assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
         attachments: true,
@@ -381,6 +393,7 @@ export class TicketService {
             : dto.dueDate
               ? new Date(dto.dueDate)
               : null,
+        projectId: dto.projectId === undefined ? undefined : dto.projectId,
       },
       include: TICKET_MUTATION_INCLUDE,
     });

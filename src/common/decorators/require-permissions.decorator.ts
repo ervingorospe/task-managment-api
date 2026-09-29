@@ -14,6 +14,7 @@ export type PermissionResource =
   | 'param.orgId'
   | 'param.slug'
   | 'tag.tagId'
+  | 'project.projectId'
   | 'role.roleId'
   | 'member.memberId'
   | 'memberInvite.inviteId'

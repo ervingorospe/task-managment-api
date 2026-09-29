@@ -135,6 +135,16 @@ export class PermissionsGuard implements CanActivate {
         return { mode: 'org', orgId: tag.orgId };
       }
 
+      case 'project.projectId': {
+        const id = this.intFrom(request.params?.projectId, 'projectId');
+        const project = await this.prisma.project.findUnique({
+          where: { id },
+          select: { orgId: true },
+        });
+        if (!project) throw new NotFoundException('Project not found.');
+        return { mode: 'org', orgId: project.orgId };
+      }
+
       case 'role.roleId': {
         const id = this.intFrom(request.params?.roleId, 'roleId');
         const role = await this.prisma.role.findUnique({
