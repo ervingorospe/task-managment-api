@@ -4,6 +4,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { SendEmailCommand, SESClient } from '@aws-sdk/client-ses';
+import { createCircuitBreaker } from '../../common/helper/circuit-breaker.helper';
 
 export interface SendEmailParams {
   to: string;
@@ -32,16 +33,17 @@ export class SesService {
   private readonly sender = process.env.AWS_SES_SENDER ?? '';
   private client: SESClient | null = null;
 
+  // Repeated SES failures (sandbox restrictions, throttling, an outage)
+  // shouldn't mean every caller pays a full timeout on every attempt —
+  // once it's clearly down, this fails fast instead, and tests recovery
+  // periodically. See circuit-breaker.helper.ts.
+  private readonly breaker = createCircuitBreaker(
+    'ses.send',
+    (command: SendEmailCommand) => this.getClient().send(command),
+  );
+
   async send({ to, subject, html, text }: SendEmailParams): Promise<void> {
-    const client = this.getClient();
-    console.log({
-      sender: this.sender,
-      to,
-      Message: {
-        Subject: { Data: subject, Charset: 'UTF-8' },
-      },
-    });
-    await client.send(
+    await this.breaker.fire(
       new SendEmailCommand({
         Source: this.sender,
         Destination: { ToAddresses: [to] },

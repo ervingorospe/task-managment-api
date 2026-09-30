@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
+import { createCircuitBreaker } from '../../common/helper/circuit-breaker.helper';
 
 export interface UploadedObject {
   key: string;
@@ -35,13 +36,23 @@ export class S3Service {
   // rather than just the upload feature that actually needs it.
   private client: S3Client | null = null;
 
+  // Same reasoning as SesService's breaker — a struggling/down S3 shouldn't
+  // mean every upload/delete call pays a full timeout. Shared across both
+  // operations below since they're the same dependency: either one failing
+  // means S3 itself is unhealthy, not just uploads or just deletes.
+  private readonly breaker = createCircuitBreaker(
+    's3.send',
+    (command: PutObjectCommand | DeleteObjectCommand) =>
+      this.getClient().send(command),
+  );
+
   async upload(
     file: Express.Multer.File,
     folder: string = 'attachments',
   ): Promise<UploadedObject> {
     const key = `${folder}/${randomUUID()}${extname(file.originalname)}`;
 
-    await this.getClient().send(
+    await this.breaker.fire(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -61,7 +72,7 @@ export class S3Service {
     if (!key) return;
 
     try {
-      await this.getClient().send(
+      await this.breaker.fire(
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
       );
     } catch (error) {
