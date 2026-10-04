@@ -91,6 +91,7 @@ jobs:
           # trailing newline) immediately instead of a bare 400. Never
           # echoes RENDER_API_KEY.
           echo "DEBUG: RENDER_SERVICE_ID=[$RENDER_SERVICE_ID] (length ${#RENDER_SERVICE_ID})"
+          echo "DEBUG: RENDER_API_KEY length=${#RENDER_API_KEY} (never the value itself)"
 
           # Deliberately no --fail: curl's own exit code on an HTTP error
           # tells us nothing (plain "22"), and --fail discards the
@@ -106,6 +107,19 @@ jobs:
             http_status="${raw##*$'\n'}"
             body="${raw%$'\n'*}"
           }
+
+          # Isolates whether the key/auth itself is the problem, before
+          # blaming the deploys-list call specifically: this endpoint
+          # takes no serviceId at all, so a 400/401 here means the key
+          # (or how it's being sent) is wrong, not the service id or the
+          # deploys endpoint's own params.
+          echo "DEBUG: sanity-checking the API key against GET /v1/services..."
+          render_api_get "services?limit=1"
+          echo "DEBUG: GET /v1/services -> HTTP $http_status"
+          if [ "$http_status" != "200" ]; then
+            echo "::error::Render API key check failed (HTTP $http_status): $body"
+            exit 1
+          fi
 
           echo "Looking for Render's auto-deploy of commit $commit_sha..."
           # Generous window: the ci job above can itself take a few
