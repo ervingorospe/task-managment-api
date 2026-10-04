@@ -1,11 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
-
-function toArray({ value }: { value: unknown }) {
-  if (value == null) return undefined;
-  return Array.isArray(value) ? value : [value];
-}
+import { toArray } from '../../../common/transformers/to-array.transformer';
 
 function toIntArray({ value }: { value: unknown }) {
   if (value == null) return undefined;

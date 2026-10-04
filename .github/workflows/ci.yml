@@ -1,0 +1,68 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The Prisma Client is generated into src/generated/prisma (see
+      # prisma/schema.prisma's generator block) and gitignored — every
+      # later step that imports it (typecheck, lint, test, build) needs
+      # this to have run first. Only reads the schema file; no DATABASE_URL
+      # or live database required.
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      # Blocking on purpose: fails the job on any high/critical advisory
+      # in production dependencies, except the 3 allowlisted in
+      # audit-ci.jsonc — all pinned inside every release of `prisma`
+      # itself (its unused MySQL driver), with no fix published yet.
+      - name: Security scan
+        run: npm run security:audit
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint:check
+
+      # No coverage threshold yet — this backend has essentially no test
+      # suite (one NestJS-scaffolded boilerplate test) to gate on.
+      # Tracked separately; this just keeps whatever exists passing.
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # Only runs on a real push to main (not on the PR that merged into it),
+  # and only once the ci job above is green.
+  deploy-production:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      # Render's deploy hook is a secret, pre-authenticated URL from the
+      # service's dashboard (Settings -> Deploy Hook) — no other auth
+      # needed. Add it as the RENDER_DEPLOY_HOOK_URL repo secret.
+      - name: Trigger Render deploy
+        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

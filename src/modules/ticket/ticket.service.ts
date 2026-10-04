@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service';
 import { S3Service } from '../storage/s3.service';
 import { formatReferenceId } from '../../common/helper/reference-id.helper';
@@ -52,7 +53,7 @@ export class TicketService {
     filterBy?: string[],
     involvesUserId?: number,
   ) {
-    const where: any = { ...scope, isDeleted: false };
+    const where: Prisma.TicketWhereInput = { ...scope, isDeleted: false };
 
     if (filterBy?.includes('overdue')) {
       where.dueDate = { lt: new Date() };
@@ -97,7 +98,7 @@ export class TicketService {
   }
 
   private async countNumbersForWhere(
-    where: any,
+    where: Prisma.TicketWhereInput,
     dateRange: { dateFrom?: string; dateTo?: string },
     tagsWhere: { orgId: number | null },
   ) {
@@ -222,7 +223,7 @@ export class TicketService {
   }
 
   private async listForWhere(
-    where: any,
+    where: Prisma.TicketWhereInput,
     query: {
       page?: number;
       limit?: number;
@@ -239,8 +240,13 @@ export class TicketService {
       // A plain `where.OR` here would clobber the OR block ticketWhere()
       // may have already set for involvesUserId scoping (only one OR key
       // per object) — nesting under AND keeps both conditions in force.
+      const existingAnd = Array.isArray(where.AND)
+        ? where.AND
+        : where.AND
+          ? [where.AND]
+          : [];
       where.AND = [
-        ...(where.AND ?? []),
+        ...existingAnd,
         {
           OR: [
             { title: { contains: term, mode: 'insensitive' } },
@@ -250,8 +256,18 @@ export class TicketService {
       ];
     }
     if (query.dueDateFrom || query.dueDateTo) {
+      // dueDate may already carry a `lt` from ticketWhere()'s "overdue"
+      // filter — merge rather than clobber so both stay in force. The
+      // instanceof guard excludes the plain-Date/string shorthand this
+      // field's type also allows, neither of which this code ever sets.
+      const existingDueDate =
+        where.dueDate &&
+        typeof where.dueDate === 'object' &&
+        !(where.dueDate instanceof Date)
+          ? where.dueDate
+          : undefined;
       where.dueDate = {
-        ...where.dueDate,
+        ...existingDueDate,
         ...(query.dueDateFrom ? { gte: new Date(query.dueDateFrom) } : {}),
         ...(query.dueDateTo ? { lte: new Date(query.dueDateTo) } : {}),
       };

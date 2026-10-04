@@ -66,4 +66,7 @@ process.on('uncaughtException', (error) => {
   logger.error('Uncaught exception', error.stack);
 });
 
-bootstrap();
+// Intentionally unawaited at the top level — a rejection here is caught
+// by the unhandledRejection handler above, consistent with this file's
+// log-and-continue stance.
+void bootstrap();

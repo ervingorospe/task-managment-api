@@ -1,10 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsArray, IsDateString, IsOptional } from 'class-validator';
-
-function toArray({ value }: { value: unknown }) {
-  if (value == null) return undefined;
-  return Array.isArray(value) ? value : [value];
-}
+import { toArray } from '../../../common/transformers/to-array.transformer';
 
 export class PersonalCountNumbersQueryDto {
   @IsOptional()

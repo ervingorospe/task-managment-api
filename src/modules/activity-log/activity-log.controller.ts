@@ -89,9 +89,11 @@ export class ActivityLogController {
   streamNotifications(
     @CurrentUser() user: RequestUser,
   ): Observable<MessageEvent> {
-    const changes$ = this.notificationEvents.subscribe(user.id).pipe(
-      map((): MessageEvent => ({ type: 'notification', data: 'update' })),
-    );
+    const changes$ = this.notificationEvents
+      .subscribe(user.id)
+      .pipe(
+        map((): MessageEvent => ({ type: 'notification', data: 'update' })),
+      );
     const heartbeat$ = interval(HEARTBEAT_MS).pipe(
       map((): MessageEvent => ({ type: 'heartbeat', data: 'ping' })),
     );

@@ -6,6 +6,7 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { Observable, lastValueFrom, of } from 'rxjs';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '../../generated/prisma/client.js';
@@ -36,8 +37,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
     context: ExecutionContext,
     next: CallHandler,
   ): Promise<Observable<any>> {
-    const request = context.switchToHttp().getRequest();
-    const method = (request.method as string).toUpperCase();
+    const request = context.switchToHttp().getRequest<Request>();
+    const method = request.method.toUpperCase();
 
     if (!MUTATING_METHODS.has(method)) return next.handle();
 
@@ -50,7 +51,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     });
     if (existing) {
       this.logger.log(`Replaying cached response for idempotency key ${key}`);
-      const response = context.switchToHttp().getResponse();
+      const response = context.switchToHttp().getResponse<Response>();
       response.status(existing.responseStatus);
       return of(existing.responseBody);
     }
@@ -81,13 +82,20 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     try {
-      const data = await lastValueFrom(next.handle());
-      const response = context.switchToHttp().getResponse();
+      // The response body is genuinely opaque here by design — this
+      // interceptor is a cross-cutting concern wrapping every mutating
+      // handler in the app, and stores back whatever that handler
+      // returned so a replayed request gets the same payload.
+      const data = (await lastValueFrom(next.handle())) as unknown;
+      const response = context.switchToHttp().getResponse<Response>();
       await this.prisma.idempotencyKey.update({
         where: { key },
         data: {
           responseStatus: response.statusCode,
-          responseBody: data === undefined ? Prisma.JsonNull : data,
+          responseBody:
+            data === undefined
+              ? Prisma.JsonNull
+              : (data as Prisma.InputJsonValue),
         },
       });
       return of(data);

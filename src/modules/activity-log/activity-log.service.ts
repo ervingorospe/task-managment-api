@@ -1,9 +1,16 @@
 import { Injectable } from '@nestjs/common';
+import { ActivityModule, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationEventsService } from './notification-events.service';
 import type { LogActivityDto } from './dto/log-activity.dto';
 import type { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import type { PersonalActivityLogQueryDto } from './dto/personal-activity-log-query.dto';
+
+const VALID_ACTIVITY_MODULES = new Set<string>(Object.values(ActivityModule));
+
+function isActivityModule(value: string): value is ActivityModule {
+  return VALID_ACTIVITY_MODULES.has(value);
+}
 
 @Injectable()
 export class ActivityLogService {
@@ -33,10 +40,13 @@ export class ActivityLogService {
   }
 
   async list(query: ActivityLogQueryDto) {
-    const where: any = { orgId: query.orgId };
+    const where: Prisma.ActivityLogEntryWhereInput = { orgId: query.orgId };
 
     if (query.module?.length) {
-      where.module = { in: query.module.map((m) => m.toUpperCase()) };
+      const modules = query.module
+        .map((m) => m.toUpperCase())
+        .filter(isActivityModule);
+      if (modules.length) where.module = { in: modules };
     }
     if (query.author?.length) {
       where.actorId = { in: query.author };
@@ -55,10 +65,16 @@ export class ActivityLogService {
    * the job instead, since the owner is always the actor for their own
    * personal-ticket activity. */
   async listPersonal(userId: number, query: PersonalActivityLogQueryDto) {
-    const where: any = { orgId: null, actorId: userId };
+    const where: Prisma.ActivityLogEntryWhereInput = {
+      orgId: null,
+      actorId: userId,
+    };
 
     if (query.module?.length) {
-      where.module = { in: query.module.map((m) => m.toUpperCase()) };
+      const modules = query.module
+        .map((m) => m.toUpperCase())
+        .filter(isActivityModule);
+      if (modules.length) where.module = { in: modules };
     }
     if (query.dateFrom || query.dateTo) {
       where.createdAt = {
@@ -71,7 +87,7 @@ export class ActivityLogService {
   }
 
   private async listForWhere(
-    where: any,
+    where: Prisma.ActivityLogEntryWhereInput,
     query: { page?: number; limit?: number },
   ) {
     const page = query.page ?? 1;

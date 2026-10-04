@@ -1,4 +1,4 @@
-import { Transform } from 'class-transformer';
+import { Transform, type TransformFnParams } from 'class-transformer';
 
 /**
  * `@IsOptional()` only skips validation for `undefined`/`null` — not `""`.
@@ -9,5 +9,7 @@ import { Transform } from 'class-transformer';
  * `@IsOptional()` to normalize `""` to `undefined` first.
  */
 export function EmptyToUndefined() {
-  return Transform(({ value }) => (value === '' ? undefined : value));
+  return Transform(({ value }: TransformFnParams): unknown =>
+    value === '' ? undefined : value,
+  );
 }

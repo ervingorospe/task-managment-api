@@ -23,7 +23,7 @@ export interface RequestUser {
   createdViaInvite: boolean;
 }
 
-type AuthenticatedRequest = Request & { user?: RequestUser };
+export type AuthenticatedRequest = Request & { user?: RequestUser };
 
 type Scope = { mode: 'org'; orgId: number } | { mode: 'authorized' };
 

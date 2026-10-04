@@ -1,0 +1,22 @@
+{
+  // Blocks the CI job on any high/critical advisory, except the three
+  // allowlisted below — all three are pinned inside every release of
+  // `prisma` itself (its bundled, unused MySQL driver/config-merge
+  // tooling), with no patched version published yet. See
+  // .github/workflows/ci.yml's "Security scan" step for the full
+  // rationale, and re-run `npm audit --omit=dev` periodically to check
+  // whether upstream has shipped a fix that lets one of these be removed.
+  "high": true,
+  "skip-dev": true,
+  "allowlist": [
+    // deepmerge-ts: stack exhaustion merging recursive object graphs —
+    // pulled in by @prisma/config.
+    "GHSA-ggr8-5vv4-36mx",
+    // mysql2: auth plugin downgrade leaks plaintext credentials —
+    // pulled in by prisma's bundled (unused) MySQL driver.
+    "GHSA-3f6p-5ww8-9rcr",
+    // mysql2: unbounded zlib inflate allows a decompression-bomb DoS —
+    // same unused driver as above.
+    "GHSA-rgwj-5xj2-c3m3",
+  ],
+}

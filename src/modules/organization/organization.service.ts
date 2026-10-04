@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { InviteStatus, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { S3Service } from '../storage/s3.service';
@@ -252,18 +253,27 @@ export class OrganizationService {
   }
 
   /** `tx` accepts either the main PrismaService or a `$transaction` callback client. */
-  async getDetailsBySlug(slug: string, tx: any = this.prisma) {
+  async getDetailsBySlug(
+    slug: string,
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
     return this.getDetailsWhere({ settings: { slug }, isDeleted: false }, tx);
   }
 
   /** Same shape as getDetailsBySlug, keyed by the numeric id instead —
    * for callers (like a ticket, which only carries orgId) that don't have
    * the slug on hand. */
-  async getDetailsById(orgId: number, tx: any = this.prisma) {
+  async getDetailsById(
+    orgId: number,
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
     return this.getDetailsWhere({ id: orgId, isDeleted: false }, tx);
   }
 
-  private async getDetailsWhere(where: any, tx: any = this.prisma) {
+  private async getDetailsWhere(
+    where: Prisma.OrganizationWhereInput,
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
     const organization = await tx.organization.findFirst({
       where,
       include: {
@@ -312,17 +322,14 @@ export class OrganizationService {
     // the rows already fetched above (cheap), then persisted for anyone
     // else reading this org before its next natural refresh.
     const now = new Date();
-    const invites = organization.invites.map((invite: any) =>
+    const invites = organization.invites.map((invite) =>
       invite.status === 'PENDING' && invite.expiry && invite.expiry < now
-        ? { ...invite, status: 'EXPIRED' }
+        ? { ...invite, status: InviteStatus.EXPIRED }
         : invite,
     );
     const justExpiredIds = invites
-      .filter(
-        (invite: any, i: number) =>
-          invite.status !== organization.invites[i].status,
-      )
-      .map((invite: any) => invite.id);
+      .filter((invite, i) => invite.status !== organization.invites[i].status)
+      .map((invite) => invite.id);
     if (justExpiredIds.length > 0) {
       await tx.memberInvite.updateMany({
         where: { id: { in: justExpiredIds } },
@@ -334,17 +341,16 @@ export class OrganizationService {
     // progress" — only a still-PENDING one blocks the banner (and, per
     // requestOwnershipTransfer's own check, blocks starting a new one).
     const pendingOwnershipTransfer = invites.find(
-      (invite: any) =>
-        invite.type === 'OWNERSHIP' && invite.status === 'PENDING',
+      (invite) => invite.type === 'OWNERSHIP' && invite.status === 'PENDING',
     );
     const pendingInvites = invites.filter(
-      (invite: any) => invite.type === 'MEMBERSHIP',
+      (invite) => invite.type === 'MEMBERSHIP',
     );
     // The owner is surfaced separately as `owner` above (and gated by its
     // own member.view.owner permission on the frontend) — never as a row
     // in `members` itself, matching MemberService.members().
     const members = organization.members.filter(
-      (member: any) => member.userId !== organization.ownerId,
+      (member) => member.userId !== organization.ownerId,
     );
 
     return {

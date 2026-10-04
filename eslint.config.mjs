@@ -6,7 +6,11 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs'],
+    // src/generated is Prisma Client's generated output (see
+    // prisma/schema.prisma's generator block) -- never hand-edited, and
+    // regenerated wholesale by `prisma generate`, so linting it is both
+    // pointless and liable to flag things no one can fix in place.
+    ignores: ['eslint.config.mjs', 'dist/**', 'src/generated/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
