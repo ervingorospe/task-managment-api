@@ -17,3 +17,15 @@ process.env.TZ = 'UTC';
 // looking connection string to build without throwing, never a real
 // database. Never used to actually connect.
 process.env.DATABASE_URL ??= 'postgresql://user:pass@localhost:5432/db';
+
+// config-validation.schema.ts's Joi schema (read by AppModule's
+// ConfigModule.forRoot()) requires these at boot — main.spec.ts imports
+// the real AppModule (through main.ts), so without these set the import
+// itself throws before any test runs. These happened to already be set
+// in a local dev shell, which is why this only surfaced in CI, not
+// locally — never used to actually reach Google or sign a real token.
+process.env.GOOGLE_CLIENT_ID ??= 'test-google-client-id';
+process.env.GOOGLE_CLIENT_SECRET ??= 'test-google-client-secret';
+process.env.GOOGLE_CALLBACK_URL ??=
+  'http://localhost:3001/auth/google/callback';
+process.env.JWT_SECRET ??= 'test-jwt-secret';
