@@ -36,4 +36,35 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // Spec files hit several strict type-checked rules that are
+    // well-documented false positives against ordinary Jest patterns,
+    // not real type-safety concerns:
+    //  - unbound-method fires on every `expect(obj.method).toHaveBeenCalled...`
+    //    — nothing is ever actually calling the method unbound; Jest's
+    //    matcher just reads the reference.
+    //  - no-unsafe-assignment/-member-access fire on mock call args
+    //    (`.mock.calls[0][0]`) and on loosely-typed third-party return
+    //    shapes (Joi's `.validate()`, opossum's `.options`, Reflector.get()).
+    //  - no-unnecessary-type-assertion fires on `{ ... } as never` casts
+    //    used throughout to pass partial DTO shapes without satisfying
+    //    every field — intentional here, not needed in app code.
+    files: ['**/*.spec.ts'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+    },
+  },
+  {
+    // main.ts's module-level `void bootstrap()` call needs to be
+    // re-triggered fresh per spec file (different env vars each time) —
+    // `require()` (not a static `import`) is the only way to run that
+    // side effect on demand instead of once at module load.
+    files: ['src/main*.spec.ts'],
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
 );

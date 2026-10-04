@@ -10,7 +10,7 @@ interface JwtPayload {
   sub: number;
 }
 
-function extractFromCookie(req: Request): string | null {
+export function extractFromCookie(req: Request): string | null {
   const cookies = req.cookies as Record<string, string> | undefined;
   return cookies?.[AUTH_COOKIE_NAME] ?? null;
 }

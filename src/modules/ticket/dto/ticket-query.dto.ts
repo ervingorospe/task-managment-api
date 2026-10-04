@@ -2,12 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import { IsArray, IsInt, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { toArray } from '../../../common/transformers/to-array.transformer';
-
-function toIntArray({ value }: { value: unknown }) {
-  if (value == null) return undefined;
-  const arr = Array.isArray(value) ? value : [value];
-  return arr.map(Number);
-}
+import { toIntArray } from '../../../common/transformers/to-int-array.transformer';
 
 export class TicketQueryDto extends PaginationQueryDto {
   @Type(() => Number)
