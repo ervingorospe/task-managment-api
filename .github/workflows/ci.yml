@@ -64,8 +64,56 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Render's deploy hook is a secret, pre-authenticated URL from the
-      # service's dashboard (Settings -> Deploy Hook) — no other auth
-      # needed. Add it as the RENDER_DEPLOY_HOOK_URL repo secret.
-      - name: Trigger Render deploy
-        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+      # A deploy hook only *triggers* a deploy and returns immediately —
+      # it can't tell us whether the deploy that follows actually
+      # succeeds, which previously made this step always green regardless
+      # of outcome. The Render REST API gives back a deploy id we can
+      # poll, so this uses that instead: trigger, then wait for a
+      # terminal status, and fail loudly (with Render's own reason) if
+      # it isn't "live". Needs two repo secrets:
+      #   RENDER_API_KEY   — Render dashboard -> Account Settings -> API Keys
+      #   RENDER_SERVICE_ID — the "srv-..." id in this service's dashboard URL
+      - name: Trigger Render deploy and wait for it to go live
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          trigger_response=$(curl --fail --silent --show-error -X POST \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json")
+
+          deploy_id=$(echo "$trigger_response" | jq -r '.id // empty')
+          if [ -z "$deploy_id" ]; then
+            echo "::error::Render did not return a deploy id. Response: $trigger_response"
+            exit 1
+          fi
+          echo "Triggered Render deploy $deploy_id — waiting for it to finish..."
+
+          # Render builds routinely take a few minutes; poll generously
+          # before giving up (40 x 15s = 10 minutes).
+          for i in $(seq 1 40); do
+            sleep 15
+            deploy=$(curl --fail --silent --show-error \
+              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$deploy_id" \
+              -H "Authorization: Bearer $RENDER_API_KEY")
+            status=$(echo "$deploy" | jq -r '.status')
+            echo "[$i/40] Render deploy status: $status"
+
+            case "$status" in
+              live)
+                echo "Render deploy succeeded."
+                exit 0
+                ;;
+              build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+                echo "::error::Render deploy $deploy_id failed with status: $status"
+                echo "$deploy" | jq .
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for Render deploy $deploy_id to finish (still: $status)."
+          exit 1
