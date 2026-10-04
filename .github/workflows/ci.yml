@@ -44,11 +44,14 @@ jobs:
       - name: Lint
         run: npm run lint:check
 
-      # No coverage threshold yet — this backend has essentially no test
-      # suite (one NestJS-scaffolded boilerplate test) to gate on.
-      # Tracked separately; this just keeps whatever exists passing.
+      # Enforces the 70% coverageThreshold in package.json's "jest" block.
+      # Deliberately fails right now — real coverage is ~0.5% (only the
+      # NestJS-scaffolded boilerplate test exists). Left failing on
+      # purpose rather than lowered to pass, so this step honestly
+      # reflects that auth/permissions/tickets/orgs aren't tested yet,
+      # instead of a green check implying they are.
       - name: Unit tests
-        run: npm test
+        run: npm run test:cov
 
       - name: Build
         run: npm run build
