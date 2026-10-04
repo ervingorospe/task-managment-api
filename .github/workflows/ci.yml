@@ -64,38 +64,61 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # A deploy hook only *triggers* a deploy and returns immediately —
-      # it can't tell us whether the deploy that follows actually
-      # succeeds, which previously made this step always green regardless
-      # of outcome. The Render REST API gives back a deploy id we can
-      # poll, so this uses that instead: trigger, then wait for a
-      # terminal status, and fail loudly (with Render's own reason) if
-      # it isn't "live". Needs two repo secrets:
-      #   RENDER_API_KEY   — Render dashboard -> Account Settings -> API Keys
+      # This service has Auto-Deploy enabled on Render — it deploys the
+      # new commit itself, triggered by its own GitHub integration,
+      # independent of this workflow. So this step does NOT trigger a
+      # second deploy (that would race the automatic one); it finds the
+      # deploy Render already created for this exact commit and polls
+      # that one until it reaches a terminal status, failing loudly
+      # (with Render's own reason) if it isn't "live". Needs two repo
+      # secrets:
+      #   RENDER_API_KEY    — Render dashboard -> Account Settings -> API Keys
       #   RENDER_SERVICE_ID — the "srv-..." id in this service's dashboard URL
-      - name: Trigger Render deploy and wait for it to go live
+      - name: Wait for Render's auto-deploy of this commit
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
         run: |
           set -euo pipefail
 
-          trigger_response=$(curl --fail --silent --show-error -X POST \
-            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
-            -H "Authorization: Bearer $RENDER_API_KEY" \
-            -H "Content-Type: application/json")
+          commit_sha="${{ github.sha }}"
+          deploy_id=""
 
-          deploy_id=$(echo "$trigger_response" | jq -r '.id // empty')
+          echo "Looking for Render's auto-deploy of commit $commit_sha..."
+          # Generous window: the ci job above can itself take a few
+          # minutes, by which point Render's own deploy may already be
+          # done — that's fine, the first list fetch just finds it
+          # already in a terminal state. This is only for the case where
+          # it's still mid-flight or hasn't registered yet.
+          for i in $(seq 1 20); do
+            list=$(curl --fail --silent --show-error \
+              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20" \
+              -H "Authorization: Bearer $RENDER_API_KEY")
+
+            # Render's list endpoint wraps each entry as {"deploy": {...}, "cursor": "..."}
+            # — unwrap defensively in case that ever changes to a flat array.
+            deploy_id=$(echo "$list" | jq -r --arg sha "$commit_sha" '
+              [.[] | (.deploy // .)] | map(select(.commit.id == $sha)) | .[0].id // empty
+            ')
+
+            if [ -n "$deploy_id" ]; then
+              echo "Found deploy $deploy_id for commit $commit_sha."
+              break
+            fi
+
+            echo "[$i/20] Not registered yet, retrying in 10s..."
+            sleep 10
+          done
+
           if [ -z "$deploy_id" ]; then
-            echo "::error::Render did not return a deploy id. Response: $trigger_response"
+            echo "::error::No Render deploy found for commit $commit_sha after waiting. Confirm Auto-Deploy is on and this service is connected to this repo/branch."
             exit 1
           fi
-          echo "Triggered Render deploy $deploy_id — waiting for it to finish..."
 
+          echo "Waiting for deploy $deploy_id to finish..."
           # Render builds routinely take a few minutes; poll generously
           # before giving up (40 x 15s = 10 minutes).
           for i in $(seq 1 40); do
-            sleep 15
             deploy=$(curl --fail --silent --show-error \
               "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$deploy_id" \
               -H "Authorization: Bearer $RENDER_API_KEY")
@@ -113,6 +136,8 @@ jobs:
                 exit 1
                 ;;
             esac
+
+            sleep 15
           done
 
           echo "::error::Timed out waiting for Render deploy $deploy_id to finish (still: $status)."
