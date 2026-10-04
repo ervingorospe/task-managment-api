@@ -84,6 +84,29 @@ jobs:
           commit_sha="${{ github.sha }}"
           deploy_id=""
 
+          # Diagnostic only — RENDER_SERVICE_ID isn't secret-sensitive
+          # (it's visible in the dashboard URL to anyone with access to
+          # the service already) and printing it bracketed surfaces a
+          # bad copy-paste (the whole dashboard URL, a stray space, a
+          # trailing newline) immediately instead of a bare 400. Never
+          # echoes RENDER_API_KEY.
+          echo "DEBUG: RENDER_SERVICE_ID=[$RENDER_SERVICE_ID] (length ${#RENDER_SERVICE_ID})"
+
+          # Deliberately no --fail: curl's own exit code on an HTTP error
+          # tells us nothing (plain "22"), and --fail discards the
+          # response body, which is exactly where Render puts the actual
+          # reason. This captures both the status and body ourselves so a
+          # failure prints Render's real error message instead of a bare
+          # exit code.
+          render_api_get() {
+            local raw
+            raw=$(curl --silent --show-error -w '\n%{http_code}' \
+              "https://api.render.com/v1/$1" \
+              -H "Authorization: Bearer $RENDER_API_KEY")
+            http_status="${raw##*$'\n'}"
+            body="${raw%$'\n'*}"
+          }
+
           echo "Looking for Render's auto-deploy of commit $commit_sha..."
           # Generous window: the ci job above can itself take a few
           # minutes, by which point Render's own deploy may already be
@@ -91,13 +114,15 @@ jobs:
           # already in a terminal state. This is only for the case where
           # it's still mid-flight or hasn't registered yet.
           for i in $(seq 1 20); do
-            list=$(curl --fail --silent --show-error \
-              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20" \
-              -H "Authorization: Bearer $RENDER_API_KEY")
+            render_api_get "services/$RENDER_SERVICE_ID/deploys?limit=20"
+            if [ "$http_status" != "200" ]; then
+              echo "::error::Render API returned HTTP $http_status listing deploys for service [$RENDER_SERVICE_ID]: $body"
+              exit 1
+            fi
 
             # Render's list endpoint wraps each entry as {"deploy": {...}, "cursor": "..."}
             # — unwrap defensively in case that ever changes to a flat array.
-            deploy_id=$(echo "$list" | jq -r --arg sha "$commit_sha" '
+            deploy_id=$(echo "$body" | jq -r --arg sha "$commit_sha" '
               [.[] | (.deploy // .)] | map(select(.commit.id == $sha)) | .[0].id // empty
             ')
 
@@ -119,10 +144,13 @@ jobs:
           # Render builds routinely take a few minutes; poll generously
           # before giving up (40 x 15s = 10 minutes).
           for i in $(seq 1 40); do
-            deploy=$(curl --fail --silent --show-error \
-              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$deploy_id" \
-              -H "Authorization: Bearer $RENDER_API_KEY")
-            status=$(echo "$deploy" | jq -r '.status')
+            render_api_get "services/$RENDER_SERVICE_ID/deploys/$deploy_id"
+            if [ "$http_status" != "200" ]; then
+              echo "::error::Render API returned HTTP $http_status fetching deploy $deploy_id: $body"
+              exit 1
+            fi
+
+            status=$(echo "$body" | jq -r '.status')
             echo "[$i/40] Render deploy status: $status"
 
             case "$status" in
@@ -132,7 +160,7 @@ jobs:
                 ;;
               build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
                 echo "::error::Render deploy $deploy_id failed with status: $status"
-                echo "$deploy" | jq .
+                echo "$body" | jq .
                 exit 1
                 ;;
             esac
