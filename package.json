@@ -104,9 +104,19 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(@nestjs/passport|@nestjs/jwt|@nestjs/config)/)"
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "setupFiles": [
+      "<rootDir>/jest.setup.ts"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s",
-      "!generated/**"
+      "!generated/**",
+      "!jest.setup.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
