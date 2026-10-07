@@ -29,6 +29,7 @@ const MODELS = [
   'member',
   'memberInvite',
   'ticket',
+  'ticketStarred',
   'ticketAttachment',
   'ticketComment',
   'ticketRequest',

@@ -2,10 +2,15 @@ import { Module } from '@nestjs/common';
 import { ActivityLogController } from './activity-log.controller';
 import { ActivityLogService } from './activity-log.service';
 import { NotificationEventsService } from './notification-events.service';
+import { RealtimeEventsService } from './realtime-events.service';
 
 @Module({
   controllers: [ActivityLogController],
-  providers: [ActivityLogService, NotificationEventsService],
+  providers: [
+    ActivityLogService,
+    NotificationEventsService,
+    RealtimeEventsService,
+  ],
   exports: [ActivityLogService],
 })
 export class ActivityLogModule {}

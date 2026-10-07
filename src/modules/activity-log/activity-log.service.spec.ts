@@ -1,6 +1,7 @@
 import { ActivityLogService } from './activity-log.service';
 import { createMockPrisma } from '../../test/mock-prisma';
 import type { NotificationEventsService } from './notification-events.service';
+import type { RealtimeEventsService } from './realtime-events.service';
 
 function makeNotificationEvents() {
   return {
@@ -10,6 +11,14 @@ function makeNotificationEvents() {
   } as unknown as NotificationEventsService;
 }
 
+function makeRealtimeEvents() {
+  return {
+    publish: jest.fn(),
+    subscribe: jest.fn(),
+    unsubscribe: jest.fn(),
+  } as unknown as RealtimeEventsService;
+}
+
 describe('ActivityLogService', () => {
   describe('log', () => {
     it('notifies every involved user except the actor for a TICKET entry', async () => {
@@ -17,10 +26,15 @@ describe('ActivityLogService', () => {
       prisma.activityLogEntry.create.mockResolvedValue({
         module: 'TICKET',
         actorId: 1,
+        orgId: 5,
         involvedUserIds: [1, 2, 3],
       });
       const notificationEvents = makeNotificationEvents();
-      const service = new ActivityLogService(prisma, notificationEvents);
+      const service = new ActivityLogService(
+        prisma,
+        notificationEvents,
+        makeRealtimeEvents(),
+      );
 
       await service.log({} as never);
 
@@ -35,14 +49,82 @@ describe('ActivityLogService', () => {
       prisma.activityLogEntry.create.mockResolvedValue({
         module: 'MEMBER',
         actorId: 1,
+        orgId: 5,
         involvedUserIds: [2],
       });
       const notificationEvents = makeNotificationEvents();
-      const service = new ActivityLogService(prisma, notificationEvents);
+      const service = new ActivityLogService(
+        prisma,
+        notificationEvents,
+        makeRealtimeEvents(),
+      );
 
       await service.log({} as never);
 
       expect(notificationEvents.notify).not.toHaveBeenCalled();
+    });
+
+    it.each(['TICKET', 'REQUEST', 'PROJECT'] as const)(
+      "publishes to the org's channel for an org-scoped %s entry",
+      async (module) => {
+        const prisma = createMockPrisma();
+        prisma.activityLogEntry.create.mockResolvedValue({
+          module,
+          actorId: 1,
+          orgId: 5,
+          involvedUserIds: [1],
+        });
+        const realtimeEvents = makeRealtimeEvents();
+        const service = new ActivityLogService(
+          prisma,
+          makeNotificationEvents(),
+          realtimeEvents,
+        );
+
+        await service.log({} as never);
+
+        expect(realtimeEvents.publish).toHaveBeenCalledWith('org:5', module);
+      },
+    );
+
+    it("publishes to the owner's channel for a personal (org-less) TICKET entry", async () => {
+      const prisma = createMockPrisma();
+      prisma.activityLogEntry.create.mockResolvedValue({
+        module: 'TICKET',
+        actorId: 7,
+        orgId: null,
+        involvedUserIds: [7],
+      });
+      const realtimeEvents = makeRealtimeEvents();
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        realtimeEvents,
+      );
+
+      await service.log({} as never);
+
+      expect(realtimeEvents.publish).toHaveBeenCalledWith('user:7', 'TICKET');
+    });
+
+    it('does not publish a realtime event for a module with no live list (e.g. MEMBER)', async () => {
+      const prisma = createMockPrisma();
+      prisma.activityLogEntry.create.mockResolvedValue({
+        module: 'MEMBER',
+        actorId: 1,
+        orgId: 5,
+        involvedUserIds: [1],
+      });
+      const realtimeEvents = makeRealtimeEvents();
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        realtimeEvents,
+      );
+
+      await service.log({} as never);
+
+      expect(realtimeEvents.publish).not.toHaveBeenCalled();
     });
   });
 
@@ -51,7 +133,11 @@ describe('ActivityLogService', () => {
       const prisma = createMockPrisma();
       prisma.activityLogEntry.findMany.mockResolvedValue([]);
       prisma.activityLogEntry.count.mockResolvedValue(0);
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       const result = await service.list({ orgId: 5 } as never);
 
@@ -66,7 +152,11 @@ describe('ActivityLogService', () => {
 
     it('filters by validated, uppercased module values', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, module: ['ticket', 'bogus'] } as never);
 
@@ -79,7 +169,11 @@ describe('ActivityLogService', () => {
 
     it('omits the module filter entirely when nothing validates', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, module: ['bogus'] } as never);
 
@@ -90,7 +184,11 @@ describe('ActivityLogService', () => {
 
     it('filters by author ids', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, author: [1, 2] } as never);
 
@@ -103,7 +201,11 @@ describe('ActivityLogService', () => {
 
     it('filters by a date range', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({
         orgId: 5,
@@ -126,7 +228,11 @@ describe('ActivityLogService', () => {
 
     it('filters by dateFrom alone', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, dateFrom: '2026-01-01' } as never);
 
@@ -139,7 +245,11 @@ describe('ActivityLogService', () => {
 
     it('filters by dateTo alone', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, dateTo: '2026-01-31' } as never);
 
@@ -152,7 +262,11 @@ describe('ActivityLogService', () => {
 
     it('respects a custom page and limit', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.list({ orgId: 5, page: 3, limit: 10 } as never);
 
@@ -165,7 +279,11 @@ describe('ActivityLogService', () => {
   describe('listPersonal', () => {
     it('scopes by orgId: null and actorId instead of orgId', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.listPersonal(7, {} as never);
 
@@ -176,7 +294,11 @@ describe('ActivityLogService', () => {
 
     it('also applies the module filter', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.listPersonal(7, { module: ['member'] } as never);
 
@@ -189,7 +311,11 @@ describe('ActivityLogService', () => {
 
     it('also applies the date range filter', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.listPersonal(7, { dateFrom: '2026-01-01' } as never);
 
@@ -206,7 +332,11 @@ describe('ActivityLogService', () => {
 
     it('applies dateTo alone', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.listPersonal(7, { dateTo: '2026-01-31' } as never);
 
@@ -223,7 +353,11 @@ describe('ActivityLogService', () => {
 
     it('omits the module filter entirely when nothing validates', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.listPersonal(7, { module: ['bogus'] } as never);
 
@@ -242,7 +376,11 @@ describe('ActivityLogService', () => {
       });
       prisma.activityLogEntry.findMany.mockResolvedValue([{ id: 1 }]);
       prisma.activityLogEntry.count.mockResolvedValue(3);
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       const result = await service.getNotifications(7);
 
@@ -272,7 +410,11 @@ describe('ActivityLogService', () => {
   describe('markNotificationsSeen', () => {
     it('stamps notificationsSeenAt with the current time', async () => {
       const prisma = createMockPrisma();
-      const service = new ActivityLogService(prisma, makeNotificationEvents());
+      const service = new ActivityLogService(
+        prisma,
+        makeNotificationEvents(),
+        makeRealtimeEvents(),
+      );
 
       await service.markNotificationsSeen(7);
 

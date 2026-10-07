@@ -4,6 +4,8 @@ import {
   Get,
   HttpCode,
   MessageEvent,
+  Param,
+  ParseIntPipe,
   Patch,
   Post,
   Query,
@@ -13,6 +15,7 @@ import { interval, merge, type Observable } from 'rxjs';
 import { finalize, map } from 'rxjs/operators';
 import { ActivityLogService } from './activity-log.service';
 import { NotificationEventsService } from './notification-events.service';
+import { RealtimeEventsService } from './realtime-events.service';
 import { LogActivityDto } from './dto/log-activity.dto';
 import { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import { PersonalActivityLogQueryDto } from './dto/personal-activity-log-query.dto';
@@ -33,6 +36,7 @@ export class ActivityLogController {
   constructor(
     private readonly activityLogService: ActivityLogService,
     private readonly notificationEvents: NotificationEventsService,
+    private readonly realtimeEvents: RealtimeEventsService,
   ) {}
 
   // actorId comes from the session, not the body — otherwise any logged-in
@@ -100,6 +104,52 @@ export class ActivityLogController {
 
     return merge(changes$, heartbeat$).pipe(
       finalize(() => this.notificationEvents.unsubscribe(user.id)),
+    );
+  }
+
+  // Live push for an org's ticket/request/project lists — every active
+  // member shares this one channel (see RealtimeEventsService.orgChannel);
+  // just "are you a member of this org", same as viewing the org's own
+  // basic details, not gated by any specific Rule. The event's `type` is
+  // the ActivityModule it concerns ("TICKET"/"REQUEST"/"PROJECT"), so the
+  // frontend only reacts to the list it's actually showing.
+  @RequirePermissions({ resource: 'param.orgId' })
+  @Sse('organizations/:orgId/stream')
+  streamOrgResourceEvents(
+    @Param('orgId', ParseIntPipe) orgId: number,
+  ): Observable<MessageEvent> {
+    const channel = RealtimeEventsService.orgChannel(orgId);
+    const changes$ = this.realtimeEvents
+      .subscribe(channel)
+      .pipe(
+        map((resource): MessageEvent => ({ type: resource, data: 'update' })),
+      );
+    const heartbeat$ = interval(HEARTBEAT_MS).pipe(
+      map((): MessageEvent => ({ type: 'heartbeat', data: 'ping' })),
+    );
+
+    return merge(changes$, heartbeat$).pipe(
+      finalize(() => this.realtimeEvents.unsubscribe(channel)),
+    );
+  }
+
+  // Same, for the caller's own personal (org-less) tickets.
+  @Sse('personal/stream')
+  streamPersonalResourceEvents(
+    @CurrentUser() user: RequestUser,
+  ): Observable<MessageEvent> {
+    const channel = RealtimeEventsService.userChannel(user.id);
+    const changes$ = this.realtimeEvents
+      .subscribe(channel)
+      .pipe(
+        map((resource): MessageEvent => ({ type: resource, data: 'update' })),
+      );
+    const heartbeat$ = interval(HEARTBEAT_MS).pipe(
+      map((): MessageEvent => ({ type: 'heartbeat', data: 'ping' })),
+    );
+
+    return merge(changes$, heartbeat$).pipe(
+      finalize(() => this.realtimeEvents.unsubscribe(channel)),
     );
   }
 }

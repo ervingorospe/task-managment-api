@@ -23,7 +23,7 @@ describe('TicketService', () => {
       ]);
       const service = new TicketService(prisma, makeS3());
 
-      const result = await service.countNumbers({ orgId: 5 } as never);
+      const result = await service.countNumbers({ orgId: 5 } as never, 1);
 
       expect(result).toEqual({
         totalTickets: 10,
@@ -43,7 +43,7 @@ describe('TicketService', () => {
       prisma.ticket.groupBy.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
 
-      await service.countNumbers({ orgId: 5, projectIds: [1, 2] } as never);
+      await service.countNumbers({ orgId: 5, projectIds: [1, 2] } as never, 1);
 
       expect(prisma.ticket.count).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -59,11 +59,14 @@ describe('TicketService', () => {
       prisma.ticket.groupBy.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
 
-      await service.countNumbers({
-        orgId: 5,
-        dateFrom: '2026-01-01',
-        dateTo: '2026-01-31',
-      } as never);
+      await service.countNumbers(
+        {
+          orgId: 5,
+          dateFrom: '2026-01-01',
+          dateTo: '2026-01-31',
+        } as never,
+        1,
+      );
 
       expect(prisma.ticket.count).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -84,10 +87,13 @@ describe('TicketService', () => {
       prisma.ticket.groupBy.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
 
-      await service.countNumbers({
-        orgId: 5,
-        dateFrom: '2026-01-01',
-      } as never);
+      await service.countNumbers(
+        {
+          orgId: 5,
+          dateFrom: '2026-01-01',
+        } as never,
+        1,
+      );
 
       expect(prisma.ticket.count).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -105,10 +111,13 @@ describe('TicketService', () => {
       prisma.ticket.groupBy.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
 
-      await service.countNumbers({
-        orgId: 5,
-        dateTo: '2026-01-31',
-      } as never);
+      await service.countNumbers(
+        {
+          orgId: 5,
+          dateTo: '2026-01-31',
+        } as never,
+        1,
+      );
 
       expect(prisma.ticket.count).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -142,8 +151,9 @@ describe('TicketService', () => {
   describe('ticketWhere filters (via allForOrg/list)', () => {
     it('filters by overdue', async () => {
       const prisma = createMockPrisma();
+      prisma.ticket.findMany.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
-      await service.allForOrg(5, undefined);
+      await service.allForOrg(5, 1, undefined);
       // overdue isn't passed here; verify filterBy path separately below
       expect(prisma.ticket.findMany).toHaveBeenCalled();
     });
@@ -154,16 +164,19 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({
-        orgId: 5,
-        filterBy: ['overdue', 'starred', '3'],
-      } as never);
+      await service.list(
+        {
+          orgId: 5,
+          filterBy: ['overdue', 'starred', '3'],
+        } as never,
+        42,
+      );
 
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             dueDate: { lt: expect.any(Date) },
-            starred: true,
+            starredBy: { some: { userId: 42 } },
             tagId: { in: [3] },
           }),
         }),
@@ -176,7 +189,7 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({ orgId: 5, involvesUserId: 9 } as never);
+      await service.list({ orgId: 5, involvesUserId: 9 } as never, 1);
 
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -196,11 +209,14 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({
-        orgId: 5,
-        memberIds: [1, 2],
-        projectIds: [3],
-      } as never);
+      await service.list(
+        {
+          orgId: 5,
+          memberIds: [1, 2],
+          projectIds: [3],
+        } as never,
+        1,
+      );
 
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -218,11 +234,14 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({
-        orgId: 5,
-        involvesUserId: 9,
-        search: '  bug  ',
-      } as never);
+      await service.list(
+        {
+          orgId: 5,
+          involvesUserId: 9,
+          search: '  bug  ',
+        } as never,
+        1,
+      );
 
       const [args] = prisma.ticket.findMany.mock.calls[0];
       expect(args.where.OR).toEqual([
@@ -245,11 +264,14 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({
-        orgId: 5,
-        filterBy: ['overdue'],
-        dueDateFrom: '2026-01-01',
-      } as never);
+      await service.list(
+        {
+          orgId: 5,
+          filterBy: ['overdue'],
+          dueDateFrom: '2026-01-01',
+        } as never,
+        1,
+      );
 
       const [args] = prisma.ticket.findMany.mock.calls[0];
       expect(args.where.dueDate).toEqual({
@@ -268,7 +290,11 @@ describe('TicketService', () => {
 
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { ownerId: 7, isDeleted: false, starred: true },
+          where: {
+            ownerId: 7,
+            isDeleted: false,
+            starredBy: { some: { userId: 7 } },
+          },
         }),
       );
     });
@@ -279,7 +305,7 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({ orgId: 5, page: 2, limit: 5 } as never);
+      await service.list({ orgId: 5, page: 2, limit: 5 } as never, 1);
 
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 5, take: 5 }),
@@ -292,10 +318,13 @@ describe('TicketService', () => {
       prisma.ticket.count.mockResolvedValue(0);
       const service = new TicketService(prisma, makeS3());
 
-      await service.list({
-        orgId: 5,
-        dueDateTo: '2026-01-31',
-      } as never);
+      await service.list(
+        {
+          orgId: 5,
+          dueDateTo: '2026-01-31',
+        } as never,
+        1,
+      );
 
       const [args] = prisma.ticket.findMany.mock.calls[0];
       expect(args.where.dueDate).toEqual({ lte: new Date('2026-01-31') });
@@ -309,6 +338,7 @@ describe('TicketService', () => {
         listForWhere: (
           where: Record<string, unknown>,
           query: { search?: string },
+          callerId: number,
         ) => Promise<unknown>;
       };
       const expectedAnd = [
@@ -316,13 +346,17 @@ describe('TicketService', () => {
         expect.objectContaining({ OR: expect.any(Array) }),
       ];
 
-      await service.listForWhere({ AND: { foo: 'bar' } }, { search: 'bug' });
+      await service.listForWhere({ AND: { foo: 'bar' } }, { search: 'bug' }, 1);
       const [firstCall] = prisma.ticket.findMany.mock.calls[0] as [
         { where: { AND: unknown[] } },
       ];
       expect(firstCall.where.AND).toEqual(expectedAnd);
 
-      await service.listForWhere({ AND: [{ foo: 'bar' }] }, { search: 'bug' });
+      await service.listForWhere(
+        { AND: [{ foo: 'bar' }] },
+        { search: 'bug' },
+        1,
+      );
       const [secondCall] = prisma.ticket.findMany.mock.calls[1] as [
         { where: { AND: unknown[] } },
       ];
@@ -333,6 +367,7 @@ describe('TicketService', () => {
   describe('allForOwner / recent', () => {
     it('scopes allForOwner by ownerId', async () => {
       const prisma = createMockPrisma();
+      prisma.ticket.findMany.mockResolvedValue([]);
       const service = new TicketService(prisma, makeS3());
       await service.allForOwner(7);
       expect(prisma.ticket.findMany).toHaveBeenCalledWith(
@@ -340,17 +375,22 @@ describe('TicketService', () => {
       );
     });
 
-    it('fetches the 5 most recent tickets and requests for an org', async () => {
+    it("fetches the 5 most recent tickets and requests for an org, with the caller's starred flag attached", async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findMany.mockResolvedValue([{ id: 1 }]);
       prisma.ticketRequest.findMany.mockResolvedValue([{ id: 2 }]);
+      prisma.ticketStarred.findMany.mockResolvedValue([{ ticketId: 1 }]);
       const service = new TicketService(prisma, makeS3());
 
-      const result = await service.recent(5);
+      const result = await service.recent(5, 9);
 
       expect(result).toEqual({
-        tickets: [{ id: 1 }],
+        tickets: [{ id: 1, starred: true }],
         requests: [{ id: 2 }],
+      });
+      expect(prisma.ticketStarred.findMany).toHaveBeenCalledWith({
+        where: { userId: 9, ticketId: { in: [1] } },
+        select: { ticketId: true },
       });
     });
   });
@@ -361,17 +401,33 @@ describe('TicketService', () => {
       prisma.ticket.findFirst.mockResolvedValue(null);
       const service = new TicketService(prisma, makeS3());
 
-      await expect(service.details(1)).rejects.toThrow(NotFoundException);
+      await expect(service.details(1, 1)).rejects.toThrow(NotFoundException);
     });
 
-    it('returns the ticket when found', async () => {
+    it("returns the ticket with the caller's starred flag attached", async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1, title: 'Bug' });
+      prisma.ticketStarred.findUnique.mockResolvedValue({ ticketId: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      const result = await service.details(1);
+      const result = await service.details(1, 7);
 
-      expect(result).toEqual({ id: 1, title: 'Bug' });
+      expect(result).toEqual({ id: 1, title: 'Bug', starred: true });
+      expect(prisma.ticketStarred.findUnique).toHaveBeenCalledWith({
+        where: { userId_ticketId: { userId: 7, ticketId: 1 } },
+        select: { ticketId: true },
+      });
+    });
+
+    it('returns starred: false when the caller has not starred it', async () => {
+      const prisma = createMockPrisma();
+      prisma.ticket.findFirst.mockResolvedValue({ id: 1, title: 'Bug' });
+      prisma.ticketStarred.findUnique.mockResolvedValue(null);
+      const service = new TicketService(prisma, makeS3());
+
+      const result = await service.details(1, 7);
+
+      expect(result).toEqual({ id: 1, title: 'Bug', starred: false });
     });
   });
 
@@ -488,7 +544,7 @@ describe('TicketService', () => {
       prisma.ticket.findFirst.mockResolvedValue(null);
       const service = new TicketService(prisma, makeS3());
 
-      await expect(service.update(1, {} as never)).rejects.toThrow(
+      await expect(service.update(1, {} as never, 1)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -496,9 +552,10 @@ describe('TicketService', () => {
     it('clears dueDate when explicitly set to a falsy value', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.update(1, { dueDate: '' } as never);
+      await service.update(1, { dueDate: '' } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -510,9 +567,10 @@ describe('TicketService', () => {
     it('leaves dueDate untouched when omitted entirely', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.update(1, { title: 'New' } as never);
+      await service.update(1, { title: 'New' } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -524,9 +582,10 @@ describe('TicketService', () => {
     it('sets a new dueDate when given', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.update(1, { dueDate: '2026-03-01' } as never);
+      await service.update(1, { dueDate: '2026-03-01' } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -538,9 +597,10 @@ describe('TicketService', () => {
     it('sets a new projectId when given', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.update(1, { projectId: 7 } as never);
+      await service.update(1, { projectId: 7 } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -548,15 +608,28 @@ describe('TicketService', () => {
         }),
       );
     });
+
+    it("attaches the caller's starred flag to the updated ticket", async () => {
+      const prisma = createMockPrisma();
+      prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1, title: 'New' });
+      prisma.ticketStarred.findUnique.mockResolvedValue({ ticketId: 1 });
+      const service = new TicketService(prisma, makeS3());
+
+      const result = await service.update(1, { title: 'New' } as never, 7);
+
+      expect(result).toEqual({ id: 1, title: 'New', starred: true });
+    });
   });
 
   describe('updateTag / updateAssignees / updateStar / remove', () => {
     it('updates the tag', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.updateTag(1, { tagId: 3 } as never);
+      await service.updateTag(1, { tagId: 3 } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { tagId: 3 } }),
@@ -566,9 +639,10 @@ describe('TicketService', () => {
     it('replaces the assignee set', async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.update.mockResolvedValue({ id: 1 });
       const service = new TicketService(prisma, makeS3());
 
-      await service.updateAssignees(1, { assigneeIds: [1, 2] } as never);
+      await service.updateAssignees(1, { assigneeIds: [1, 2] } as never, 1);
 
       expect(prisma.ticket.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -577,16 +651,56 @@ describe('TicketService', () => {
       );
     });
 
-    it('updates the starred flag', async () => {
+    it("stars a ticket by upserting the caller's TicketStarred row", async () => {
       const prisma = createMockPrisma();
       prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue({
+        id: 1,
+        title: 'Bug',
+      });
       const service = new TicketService(prisma, makeS3());
 
-      await service.updateStar(1, { starred: true } as never);
+      const result = await service.updateStar(1, { starred: true } as never, 9);
 
-      expect(prisma.ticket.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { starred: true } }),
+      expect(prisma.ticketStarred.upsert).toHaveBeenCalledWith({
+        where: { userId_ticketId: { userId: 9, ticketId: 1 } },
+        create: { userId: 9, ticketId: 1 },
+        update: {},
+      });
+      expect(prisma.ticketStarred.deleteMany).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 1, title: 'Bug', starred: true });
+    });
+
+    it("unstars a ticket by deleting the caller's TicketStarred row", async () => {
+      const prisma = createMockPrisma();
+      prisma.ticket.findFirst.mockResolvedValue({ id: 1 });
+      prisma.ticket.findUniqueOrThrow.mockResolvedValue({
+        id: 1,
+        title: 'Bug',
+      });
+      const service = new TicketService(prisma, makeS3());
+
+      const result = await service.updateStar(
+        1,
+        { starred: false } as never,
+        9,
       );
+
+      expect(prisma.ticketStarred.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 9, ticketId: 1 },
+      });
+      expect(prisma.ticketStarred.upsert).not.toHaveBeenCalled();
+      expect(result).toEqual({ id: 1, title: 'Bug', starred: false });
+    });
+
+    it('throws NotFoundException starring a missing ticket', async () => {
+      const prisma = createMockPrisma();
+      prisma.ticket.findFirst.mockResolvedValue(null);
+      const service = new TicketService(prisma, makeS3());
+
+      await expect(
+        service.updateStar(1, { starred: true } as never, 9),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('soft-deletes the ticket', async () => {

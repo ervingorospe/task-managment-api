@@ -50,6 +50,7 @@ export class TicketService {
 
   private ticketWhere(
     scope: TicketScope,
+    callerId: number,
     filterBy?: string[],
     involvesUserId?: number,
   ) {
@@ -58,8 +59,10 @@ export class TicketService {
     if (filterBy?.includes('overdue')) {
       where.dueDate = { lt: new Date() };
     }
+    // Starring is per-caller (see TicketStarred) — "starred" here always
+    // means "starred by whoever is asking", never a global flag.
     if (filterBy?.includes('starred')) {
-      where.starred = true;
+      where.starredBy = { some: { userId: callerId } };
     }
 
     const tagIds = (filterBy ?? []).filter(isNumeric).map(Number);
@@ -75,9 +78,41 @@ export class TicketService {
     return where;
   }
 
-  async countNumbers(query: CountNumbersQueryDto) {
+  /** Attaches each ticket's `starred` flag — true iff `callerId` has
+   * personally starred it — without touching the query that fetched the
+   * tickets themselves. One extra query for the whole page, not one per
+   * ticket. */
+  private async attachStarred<T extends { id: number }>(
+    tickets: T[],
+    callerId: number,
+  ): Promise<(T & { starred: boolean })[]> {
+    if (tickets.length === 0) return [];
+    const starredRows = await this.prisma.ticketStarred.findMany({
+      where: { userId: callerId, ticketId: { in: tickets.map((t) => t.id) } },
+      select: { ticketId: true },
+    });
+    const starredIds = new Set(starredRows.map((row) => row.ticketId));
+    return tickets.map((t) => ({ ...t, starred: starredIds.has(t.id) }));
+  }
+
+  /** Same as attachStarred, for a single ticket (details/update/etc. —
+   * anywhere a lookup by the unique (userId, ticketId) pair is cheaper
+   * than the IN-list form above). */
+  private async attachStarredOne<T extends { id: number }>(
+    ticket: T,
+    callerId: number,
+  ): Promise<T & { starred: boolean }> {
+    const row = await this.prisma.ticketStarred.findUnique({
+      where: { userId_ticketId: { userId: callerId, ticketId: ticket.id } },
+      select: { ticketId: true },
+    });
+    return { ...ticket, starred: row != null };
+  }
+
+  async countNumbers(query: CountNumbersQueryDto, callerId: number) {
     const where = this.ticketWhere(
       { orgId: query.orgId },
+      callerId,
       query.filterBy,
       query.involvesUserId,
     );
@@ -93,7 +128,7 @@ export class TicketService {
     userId: number,
     query: PersonalCountNumbersQueryDto,
   ) {
-    const where = this.ticketWhere({ ownerId: userId }, query.filterBy);
+    const where = this.ticketWhere({ ownerId: userId }, userId, query.filterBy);
     return this.countNumbersForWhere(where, query, { orgId: null });
   }
 
@@ -153,9 +188,14 @@ export class TicketService {
    * pre-aggregated endpoints can't cover. Skips attachments/comments since
    * none of those views render them.
    */
-  async allForOrg(orgId: number, involvesUserId?: number) {
-    const where = this.ticketWhere({ orgId }, undefined, involvesUserId);
-    return this.prisma.ticket.findMany({
+  async allForOrg(orgId: number, callerId: number, involvesUserId?: number) {
+    const where = this.ticketWhere(
+      { orgId },
+      callerId,
+      undefined,
+      involvesUserId,
+    );
+    const tickets = await this.prisma.ticket.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -165,14 +205,15 @@ export class TicketService {
         assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
       },
     });
+    return this.attachStarred(tickets, callerId);
   }
 
   /** Same shape as allForOrg, for a personal (org-less) space — no
    * client/assignees exist without an org, but the include stays so the
    * response shape matches what Dashboard/Reports already expect. */
   async allForOwner(userId: number) {
-    const where = this.ticketWhere({ ownerId: userId });
-    return this.prisma.ticket.findMany({
+    const where = this.ticketWhere({ ownerId: userId }, userId);
+    const tickets = await this.prisma.ticket.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -181,9 +222,10 @@ export class TicketService {
         assignees: { include: { user: { select: PUBLIC_USER_SELECT } } },
       },
     });
+    return this.attachStarred(tickets, userId);
   }
 
-  async recent(orgId: number) {
+  async recent(orgId: number, callerId: number) {
     const [tickets, requests] = await Promise.all([
       this.prisma.ticket.findMany({
         where: { orgId, isDeleted: false },
@@ -197,12 +239,13 @@ export class TicketService {
         take: 5,
       }),
     ]);
-    return { tickets, requests };
+    return { tickets: await this.attachStarred(tickets, callerId), requests };
   }
 
-  async list(query: TicketQueryDto) {
+  async list(query: TicketQueryDto, callerId: number) {
     const where = this.ticketWhere(
       { orgId: query.orgId },
+      callerId,
       query.filterBy,
       query.involvesUserId,
     );
@@ -212,14 +255,14 @@ export class TicketService {
     if (query.projectIds?.length) {
       where.projectId = { in: query.projectIds };
     }
-    return this.listForWhere(where, query);
+    return this.listForWhere(where, query, callerId);
   }
 
   /** Same as list(), minus the memberIds filter — a personal ticket has
    * no assignees, since there's no org membership to assign from. */
   async listPersonal(userId: number, query: PersonalTicketQueryDto) {
-    const where = this.ticketWhere({ ownerId: userId }, query.filterBy);
-    return this.listForWhere(where, query);
+    const where = this.ticketWhere({ ownerId: userId }, userId, query.filterBy);
+    return this.listForWhere(where, query, userId);
   }
 
   private async listForWhere(
@@ -231,6 +274,7 @@ export class TicketService {
       dueDateFrom?: string;
       dueDateTo?: string;
     },
+    callerId: number,
   ) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 15;
@@ -295,10 +339,15 @@ export class TicketService {
       this.prisma.ticket.count({ where }),
     ]);
 
-    return { items, total, page, limit };
+    return {
+      items: await this.attachStarred(items, callerId),
+      total,
+      page,
+      limit,
+    };
   }
 
-  async details(ticketId: number) {
+  async details(ticketId: number, callerId: number) {
     const ticket = await this.prisma.ticket.findFirst({
       where: { id: ticketId, isDeleted: false },
       include: {
@@ -315,7 +364,7 @@ export class TicketService {
       },
     });
     if (!ticket) throw new NotFoundException('Ticket not found.');
-    return ticket;
+    return this.attachStarredOne(ticket, callerId);
   }
 
   async create(orgId: number, dto: CreateTicketDto) {
@@ -338,7 +387,7 @@ export class TicketService {
     });
     await assertCapacity(this.prisma, orgId, 'tickets', activeCount, 'Ticket');
 
-    return this.prisma.ticket.create({
+    const ticket = await this.prisma.ticket.create({
       data: {
         orgId,
         referenceId,
@@ -361,6 +410,8 @@ export class TicketService {
         attachments: true,
       },
     });
+    // A brand-new ticket provably has no TicketStarred row yet.
+    return { ...ticket, starred: false };
   }
 
   async createPersonal(userId: number, dto: CreatePersonalTicketDto) {
@@ -378,7 +429,7 @@ export class TicketService {
     });
     const referenceId = formatReferenceId('tckt', existingCount);
 
-    return this.prisma.ticket.create({
+    const ticket = await this.prisma.ticket.create({
       data: {
         ownerId: userId,
         referenceId,
@@ -393,12 +444,13 @@ export class TicketService {
         attachments: true,
       },
     });
+    return { ...ticket, starred: false };
   }
 
-  async update(ticketId: number, dto: UpdateTicketDto) {
+  async update(ticketId: number, dto: UpdateTicketDto, callerId: number) {
     await this.findOrThrow(ticketId);
 
-    return this.prisma.ticket.update({
+    const ticket = await this.prisma.ticket.update({
       where: { id: ticketId },
       data: {
         title: dto.title,
@@ -413,39 +465,65 @@ export class TicketService {
       },
       include: TICKET_MUTATION_INCLUDE,
     });
+    return this.attachStarredOne(ticket, callerId);
   }
 
   // tagId doubles as "status" in this app (see the schema's Ticket.tagId
   // comment) — gated by ticket.change.tag, separately from the rest of a
   // ticket's fields under ticket.update.
-  async updateTag(ticketId: number, dto: UpdateTicketTagDto) {
+  async updateTag(ticketId: number, dto: UpdateTicketTagDto, callerId: number) {
     await this.findOrThrow(ticketId);
-    return this.prisma.ticket.update({
+    const ticket = await this.prisma.ticket.update({
       where: { id: ticketId },
       data: { tagId: dto.tagId },
       include: TICKET_MUTATION_INCLUDE,
     });
+    return this.attachStarredOne(ticket, callerId);
   }
 
-  async updateAssignees(ticketId: number, dto: UpdateTicketAssigneesDto) {
+  async updateAssignees(
+    ticketId: number,
+    dto: UpdateTicketAssigneesDto,
+    callerId: number,
+  ) {
     await this.findOrThrow(ticketId);
-    return this.prisma.ticket.update({
+    const ticket = await this.prisma.ticket.update({
       where: { id: ticketId },
       data: { assignees: { set: dto.assigneeIds.map((id) => ({ id })) } },
       include: TICKET_MUTATION_INCLUDE,
     });
+    return this.attachStarredOne(ticket, callerId);
   }
 
   // Starring is a personal bookmark, not an edit to the ticket's actual
   // content — no ticket.update permission required, just view access
-  // (enforced at the route, see ticket.controller.ts).
-  async updateStar(ticketId: number, dto: UpdateTicketStarDto) {
-    await this.findOrThrow(ticketId);
-    return this.prisma.ticket.update({
-      where: { id: ticketId },
-      data: { starred: dto.starred },
+  // (enforced at the route, see ticket.controller.ts). It's also per-user
+  // (see TicketStarred), so this upserts/deletes the caller's own row
+  // instead of touching the ticket itself.
+  async updateStar(
+    ticketId: number,
+    dto: UpdateTicketStarDto,
+    callerId: number,
+  ) {
+    const ticket = await this.findOrThrow(ticketId);
+
+    if (dto.starred) {
+      await this.prisma.ticketStarred.upsert({
+        where: { userId_ticketId: { userId: callerId, ticketId } },
+        create: { userId: callerId, ticketId },
+        update: {},
+      });
+    } else {
+      await this.prisma.ticketStarred.deleteMany({
+        where: { userId: callerId, ticketId },
+      });
+    }
+
+    const full = await this.prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
       include: TICKET_MUTATION_INCLUDE,
     });
+    return { ...full, starred: dto.starred };
   }
 
   async remove(ticketId: number) {

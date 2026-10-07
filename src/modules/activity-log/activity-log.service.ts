@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ActivityModule, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationEventsService } from './notification-events.service';
+import { RealtimeEventsService } from './realtime-events.service';
 import type { LogActivityDto } from './dto/log-activity.dto';
 import type { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import type { PersonalActivityLogQueryDto } from './dto/personal-activity-log-query.dto';
@@ -12,11 +13,23 @@ function isActivityModule(value: string): value is ActivityModule {
   return VALID_ACTIVITY_MODULES.has(value);
 }
 
+// Modules whose own list pages (not just the notification bell) get a
+// live "something changed" push — see RealtimeEventsService. Deliberately
+// narrower than every ActivityModule: Member/Role/Tag changes are rare
+// enough, and their pages small enough, that a live push isn't worth a
+// stream for them yet.
+const LIVE_LIST_MODULES = new Set<ActivityModule>([
+  'TICKET',
+  'REQUEST',
+  'PROJECT',
+]);
+
 @Injectable()
 export class ActivityLogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationEvents: NotificationEventsService,
+    private readonly realtimeEvents: RealtimeEventsService,
   ) {}
 
   /**
@@ -34,6 +47,21 @@ export class ActivityLogService {
       for (const userId of entry.involvedUserIds) {
         if (userId !== entry.actorId) this.notificationEvents.notify(userId);
       }
+    }
+
+    // Live list push — org-scoped lists share one channel per org (every
+    // active member gets the signal; their own permission-filtered GET
+    // decides what they actually see, same "never carry the payload"
+    // rule as the notification bell). A personal ticket has no org, so
+    // it goes to the owner's own channel instead — unlike the bell
+    // above, this does NOT exclude the actor, since their other open
+    // tabs still need to refetch after their own action.
+    if (LIVE_LIST_MODULES.has(entry.module)) {
+      const channel =
+        entry.orgId != null
+          ? RealtimeEventsService.orgChannel(entry.orgId)
+          : RealtimeEventsService.userChannel(entry.actorId);
+      this.realtimeEvents.publish(channel, entry.module);
     }
 
     return entry;

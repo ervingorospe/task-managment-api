@@ -74,6 +74,7 @@ model User {
   memberships        Member[]
   comments           TicketComment[]
   personalTickets    Ticket[]        @relation("PersonalTicketOwner")
+  starredTickets     TicketStarred[]
 
   @@map("users")
 }
@@ -318,7 +319,6 @@ model Ticket {
   tagId       Int
   clientId    Int?
   dueDate     DateTime?
-  starred     Boolean   @default(false)
   isDeleted   Boolean   @default(false)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -332,6 +332,10 @@ model Ticket {
   attachments  TicketAttachment[]
   comments     TicketComment[]
   request      TicketRequest?
+  // Who has starred this ticket — a personal bookmark, not a property of
+  // the ticket itself, so it lives in its own per-user join table rather
+  // than a plain boolean column here. See TicketStarred below.
+  starredBy    TicketStarred[]
 
   // Postgres treats every NULL as distinct in a unique index, so these two
   // constraints coexist cleanly: an org ticket (ownerId null) never
@@ -354,8 +358,6 @@ model Ticket {
   @@index([orgId, dueDate])
   // The projectIds filter (ticketWhere's projectId `in` list).
   @@index([orgId, projectId])
-  // The Starred page's filterBy=starred.
-  @@index([orgId, starred])
   // The ticket.view.included scoping join (`client: { userId }`).
   @@index([clientId])
   // Title/reference-ID search does a `contains` (leading-wildcard ILIKE),
@@ -364,6 +366,27 @@ model Ticket {
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
   @@index([referenceId(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("tickets")
+}
+
+// A user's personal bookmark on a ticket — like favoriting, not a
+// property of the ticket. Many users can each independently star the
+// same ticket; starring never shows up to anyone but the user who did
+// it (see ticket.service.ts's attachStarred/attachStarredOne).
+model TicketStarred {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  ticketId  Int
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // One star per user per ticket — also what updateStar() upserts/deletes
+  // against, and (as a composite index with userId leading) exactly what
+  // attachStarred()'s "which of these tickets has this user starred"
+  // lookup needs, so no separate index is needed alongside it.
+  @@unique([userId, ticketId])
+  @@map("ticket_starred")
 }
 
 model TicketAttachment {

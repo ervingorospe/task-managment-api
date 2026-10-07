@@ -56,20 +56,30 @@ export class TicketController {
   // Static routes first — otherwise ':ticketId' below would swallow these.
   @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('count-numbers')
-  countNumbers(@Query() query: CountNumbersQueryDto) {
-    return this.ticketService.countNumbers(query);
+  countNumbers(
+    @CurrentUser() user: RequestUser,
+    @Query() query: CountNumbersQueryDto,
+  ) {
+    return this.ticketService.countNumbers(query, user.id);
   }
 
   @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('recent')
-  recent(@Query('orgId', ParseIntPipe) orgId: number) {
-    return this.ticketService.recent(orgId);
+  recent(
+    @CurrentUser() user: RequestUser,
+    @Query('orgId', ParseIntPipe) orgId: number,
+  ) {
+    return this.ticketService.recent(orgId, user.id);
   }
 
   @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get('all')
-  all(@Query() query: AllTicketsQueryDto) {
-    return this.ticketService.allForOrg(query.orgId, query.involvesUserId);
+  all(@CurrentUser() user: RequestUser, @Query() query: AllTicketsQueryDto) {
+    return this.ticketService.allForOrg(
+      query.orgId,
+      user.id,
+      query.involvesUserId,
+    );
   }
 
   // "personal" routes ahead of ':ticketId' for the same reason — a
@@ -108,8 +118,8 @@ export class TicketController {
 
   @RequirePermissions({ anyOf: CAN_VIEW_TICKETS })
   @Get()
-  list(@Query() query: TicketQueryDto) {
-    return this.ticketService.list(query);
+  list(@CurrentUser() user: RequestUser, @Query() query: TicketQueryDto) {
+    return this.ticketService.list(query, user.id);
   }
 
   @RequirePermissions({ allOf: [PERMISSIONS.TICKET_CREATE] })
@@ -127,8 +137,11 @@ export class TicketController {
   // checking anyOf/allOf against an org role that doesn't apply to it.
   @RequirePermissions({ anyOf: CAN_VIEW_TICKETS, resource: 'ticket.ticketId' })
   @Get(':ticketId')
-  details(@Param('ticketId', ParseIntPipe) ticketId: number) {
-    return this.ticketService.details(ticketId);
+  details(
+    @Param('ticketId', ParseIntPipe) ticketId: number,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.ticketService.details(ticketId, user.id);
   }
 
   @RequirePermissions({
@@ -139,8 +152,9 @@ export class TicketController {
   update(
     @Param('ticketId', ParseIntPipe) ticketId: number,
     @Body() dto: UpdateTicketDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.ticketService.update(ticketId, dto);
+    return this.ticketService.update(ticketId, dto, user.id);
   }
 
   // tagId doubles as "status" in this app — a separate Rule from the rest
@@ -153,8 +167,9 @@ export class TicketController {
   updateTag(
     @Param('ticketId', ParseIntPipe) ticketId: number,
     @Body() dto: UpdateTicketTagDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.ticketService.updateTag(ticketId, dto);
+    return this.ticketService.updateTag(ticketId, dto, user.id);
   }
 
   @RequirePermissions({
@@ -165,8 +180,9 @@ export class TicketController {
   updateAssignees(
     @Param('ticketId', ParseIntPipe) ticketId: number,
     @Body() dto: UpdateTicketAssigneesDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.ticketService.updateAssignees(ticketId, dto);
+    return this.ticketService.updateAssignees(ticketId, dto, user.id);
   }
 
   // Starring is a personal bookmark, not an edit — anyone who can view the
@@ -176,8 +192,9 @@ export class TicketController {
   updateStar(
     @Param('ticketId', ParseIntPipe) ticketId: number,
     @Body() dto: UpdateTicketStarDto,
+    @CurrentUser() user: RequestUser,
   ) {
-    return this.ticketService.updateStar(ticketId, dto);
+    return this.ticketService.updateStar(ticketId, dto, user.id);
   }
 
   @RequirePermissions({

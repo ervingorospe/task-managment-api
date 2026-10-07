@@ -35,30 +35,30 @@ function makeService() {
 }
 
 describe('TicketController', () => {
-  it('delegates countNumbers() with the query', () => {
+  it('delegates countNumbers() with the query and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const query = { orgId: 5 } as never;
 
-    void controller.countNumbers(query);
-    expect(service.countNumbers).toHaveBeenCalledWith(query);
+    void controller.countNumbers(USER, query);
+    expect(service.countNumbers).toHaveBeenCalledWith(query, 7);
   });
 
-  it('delegates recent() with orgId', () => {
+  it('delegates recent() with orgId and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
 
-    void controller.recent(5);
-    expect(service.recent).toHaveBeenCalledWith(5);
+    void controller.recent(USER, 5);
+    expect(service.recent).toHaveBeenCalledWith(5, 7);
   });
 
-  it('delegates all() with orgId and involvesUserId', () => {
+  it('delegates all() with orgId, caller id, and involvesUserId', () => {
     const service = makeService();
     const controller = new TicketController(service);
-    const query = { orgId: 5, involvesUserId: 7 } as never;
+    const query = { orgId: 5, involvesUserId: 9 } as never;
 
-    void controller.all(query);
-    expect(service.allForOrg).toHaveBeenCalledWith(5, 7);
+    void controller.all(USER, query);
+    expect(service.allForOrg).toHaveBeenCalledWith(5, 7, 9);
   });
 
   it('delegates countNumbersPersonal() with the caller id', () => {
@@ -96,13 +96,13 @@ describe('TicketController', () => {
     expect(service.createPersonal).toHaveBeenCalledWith(7, dto);
   });
 
-  it('delegates list() with the query', () => {
+  it('delegates list() with the query and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const query = { orgId: 5 } as never;
 
-    void controller.list(query);
-    expect(service.list).toHaveBeenCalledWith(query);
+    void controller.list(USER, query);
+    expect(service.list).toHaveBeenCalledWith(query, 7);
   });
 
   it('delegates create() with orgId and dto', () => {
@@ -114,48 +114,48 @@ describe('TicketController', () => {
     expect(service.create).toHaveBeenCalledWith(5, dto);
   });
 
-  it('delegates details() with ticketId', () => {
+  it('delegates details() with ticketId and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
 
-    void controller.details(1);
-    expect(service.details).toHaveBeenCalledWith(1);
+    void controller.details(1, USER);
+    expect(service.details).toHaveBeenCalledWith(1, 7);
   });
 
-  it('delegates update() with ticketId and dto', () => {
+  it('delegates update() with ticketId, dto, and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const dto = { title: 'New' } as never;
 
-    void controller.update(1, dto);
-    expect(service.update).toHaveBeenCalledWith(1, dto);
+    void controller.update(1, dto, USER);
+    expect(service.update).toHaveBeenCalledWith(1, dto, 7);
   });
 
-  it('delegates updateTag() with ticketId and dto', () => {
+  it('delegates updateTag() with ticketId, dto, and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const dto = { tagId: 2 } as never;
 
-    void controller.updateTag(1, dto);
-    expect(service.updateTag).toHaveBeenCalledWith(1, dto);
+    void controller.updateTag(1, dto, USER);
+    expect(service.updateTag).toHaveBeenCalledWith(1, dto, 7);
   });
 
-  it('delegates updateAssignees() with ticketId and dto', () => {
+  it('delegates updateAssignees() with ticketId, dto, and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const dto = { assigneeIds: [1] } as never;
 
-    void controller.updateAssignees(1, dto);
-    expect(service.updateAssignees).toHaveBeenCalledWith(1, dto);
+    void controller.updateAssignees(1, dto, USER);
+    expect(service.updateAssignees).toHaveBeenCalledWith(1, dto, 7);
   });
 
-  it('delegates updateStar() with ticketId and dto', () => {
+  it('delegates updateStar() with ticketId, dto, and caller id', () => {
     const service = makeService();
     const controller = new TicketController(service);
     const dto = { starred: true } as never;
 
-    void controller.updateStar(1, dto);
-    expect(service.updateStar).toHaveBeenCalledWith(1, dto);
+    void controller.updateStar(1, dto, USER);
+    expect(service.updateStar).toHaveBeenCalledWith(1, dto, 7);
   });
 
   it('delegates remove() with ticketId', () => {

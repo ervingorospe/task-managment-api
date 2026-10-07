@@ -1,5 +1,6 @@
 import { ActivityLogController } from './activity-log.controller';
 import { NotificationEventsService } from './notification-events.service';
+import { RealtimeEventsService } from './realtime-events.service';
 import type { ActivityLogService } from './activity-log.service';
 import type { RequestUser } from '../../common/guards/permissions.guard';
 
@@ -26,6 +27,7 @@ describe('ActivityLogController', () => {
     const controller = new ActivityLogController(
       activityLogService,
       new NotificationEventsService(),
+      new RealtimeEventsService(),
     );
     const dto = { module: 'TICKET', action: 'create' } as never;
 
@@ -43,6 +45,7 @@ describe('ActivityLogController', () => {
     const controller = new ActivityLogController(
       activityLogService,
       new NotificationEventsService(),
+      new RealtimeEventsService(),
     );
     const query = {} as never;
 
@@ -55,6 +58,7 @@ describe('ActivityLogController', () => {
     const controller = new ActivityLogController(
       activityLogService,
       new NotificationEventsService(),
+      new RealtimeEventsService(),
     );
     const query = { orgId: 5 } as never;
 
@@ -67,6 +71,7 @@ describe('ActivityLogController', () => {
     const controller = new ActivityLogController(
       activityLogService,
       new NotificationEventsService(),
+      new RealtimeEventsService(),
     );
 
     void controller.getNotifications(USER);
@@ -78,6 +83,7 @@ describe('ActivityLogController', () => {
     const controller = new ActivityLogController(
       activityLogService,
       new NotificationEventsService(),
+      new RealtimeEventsService(),
     );
 
     const result = await controller.markNotificationsSeen(USER);
@@ -92,6 +98,7 @@ describe('ActivityLogController', () => {
       const controller = new ActivityLogController(
         makeActivityLogService(),
         notificationEvents,
+        new RealtimeEventsService(),
       );
 
       const sub = controller.streamNotifications(USER).subscribe((event) => {
@@ -109,6 +116,7 @@ describe('ActivityLogController', () => {
       const controller = new ActivityLogController(
         makeActivityLogService(),
         notificationEvents,
+        new RealtimeEventsService(),
       );
 
       const sub = controller.streamNotifications(USER).subscribe();
@@ -123,6 +131,7 @@ describe('ActivityLogController', () => {
       const controller = new ActivityLogController(
         makeActivityLogService(),
         notificationEvents,
+        new RealtimeEventsService(),
       );
 
       const sub = controller.streamNotifications(USER).subscribe((event) => {
@@ -131,6 +140,114 @@ describe('ActivityLogController', () => {
         jest.useRealTimers();
         done();
       });
+
+      jest.advanceTimersByTime(20_000);
+    });
+  });
+
+  describe('streamOrgResourceEvents', () => {
+    it("emits the published resource as the event's type when it fires for this org", (done) => {
+      const realtimeEvents = new RealtimeEventsService();
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        realtimeEvents,
+      );
+
+      const sub = controller.streamOrgResourceEvents(5).subscribe((event) => {
+        expect(event).toEqual({ type: 'TICKET', data: 'update' });
+        sub.unsubscribe();
+        done();
+      });
+
+      realtimeEvents.publish('org:5', 'TICKET');
+    });
+
+    it('unsubscribes from the org channel when the stream is torn down', () => {
+      const realtimeEvents = new RealtimeEventsService();
+      const unsubscribeSpy = jest.spyOn(realtimeEvents, 'unsubscribe');
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        realtimeEvents,
+      );
+
+      const sub = controller.streamOrgResourceEvents(5).subscribe();
+      sub.unsubscribe();
+
+      expect(unsubscribeSpy).toHaveBeenCalledWith('org:5');
+    });
+
+    it('emits a heartbeat MessageEvent on its own cadence', (done) => {
+      jest.useFakeTimers();
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        new RealtimeEventsService(),
+      );
+
+      const sub = controller.streamOrgResourceEvents(5).subscribe((event) => {
+        expect(event).toEqual({ type: 'heartbeat', data: 'ping' });
+        sub.unsubscribe();
+        jest.useRealTimers();
+        done();
+      });
+
+      jest.advanceTimersByTime(20_000);
+    });
+  });
+
+  describe('streamPersonalResourceEvents', () => {
+    it("emits the published resource when it fires for this user's channel", (done) => {
+      const realtimeEvents = new RealtimeEventsService();
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        realtimeEvents,
+      );
+
+      const sub = controller
+        .streamPersonalResourceEvents(USER)
+        .subscribe((event) => {
+          expect(event).toEqual({ type: 'TICKET', data: 'update' });
+          sub.unsubscribe();
+          done();
+        });
+
+      realtimeEvents.publish('user:7', 'TICKET');
+    });
+
+    it("unsubscribes from the user's channel when the stream is torn down", () => {
+      const realtimeEvents = new RealtimeEventsService();
+      const unsubscribeSpy = jest.spyOn(realtimeEvents, 'unsubscribe');
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        realtimeEvents,
+      );
+
+      const sub = controller.streamPersonalResourceEvents(USER).subscribe();
+      sub.unsubscribe();
+
+      expect(unsubscribeSpy).toHaveBeenCalledWith('user:7');
+    });
+
+    it('emits a heartbeat MessageEvent on its own cadence', (done) => {
+      jest.useFakeTimers();
+      const controller = new ActivityLogController(
+        makeActivityLogService(),
+        new NotificationEventsService(),
+        new RealtimeEventsService(),
+      );
+
+      const sub = controller
+        .streamPersonalResourceEvents(USER)
+        .subscribe((event) => {
+          expect(event).toEqual({ type: 'heartbeat', data: 'ping' });
+          sub.unsubscribe();
+          jest.useRealTimers();
+          done();
+        });
 
       jest.advanceTimersByTime(20_000);
     });
