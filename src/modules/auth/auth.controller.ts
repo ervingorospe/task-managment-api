@@ -160,8 +160,14 @@ export class AuthController {
     return { message: 'Verification email sent.' };
   }
 
+  // Version-neutral for the same reason as google/google-callback above:
+  // this URL is embedded in an already-sent email (sendVerificationEmail
+  // builds it from the bare backend origin, no /v1), so it has to be
+  // reachable at exactly that unversioned path — a user clicking an old
+  // email shouldn't 404 against a version bump either.
   @Public()
   @Get('verify-email')
+  @Version(VERSION_NEUTRAL)
   async verifyEmail(@Query('token') token: string, @Res() res: Response) {
     try {
       const userId = await this.authService.verifyEmail(token);
