@@ -77,7 +77,7 @@ export class AuthService {
         `Failed to send verification email to ${email}: ${detail}`,
         error instanceof Error ? error.stack : undefined,
       );
-      // The real cause (bad SMTP credentials, the provider throttling
+      // The real cause (bad SendGrid API key, the provider throttling
       // us, etc.) is logged above — never surface it to the client, same
       // rule AllExceptionsFilter applies to every other unexpected 500.
       throw new InternalServerErrorException(

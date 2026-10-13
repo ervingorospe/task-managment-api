@@ -190,7 +190,7 @@ describe('MemberService', () => {
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       withOrgAndRole(prisma);
       const mailer = makeMailer(
-        jest.fn().mockRejectedValue(new Error('SMTP down')),
+        jest.fn().mockRejectedValue(new Error('SendGrid down')),
       );
       const service = new MemberService(prisma, mailer);
 

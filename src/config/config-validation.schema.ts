@@ -25,16 +25,15 @@ export const configValidationSchema = Joi.object({
   AWS_ACCESS_KEY_ID: Joi.string().allow('').optional(),
   AWS_SECRET_ACCESS_KEY: Joi.string().allow('').optional(),
 
-  // Email sending via SMTP (see modules/email/mailer.service.ts) —
-  // optional for the same reason: MailerService builds its transporter
-  // lazily, so nothing breaks at boot if these aren't set, only whatever
-  // eventually calls MailerService.send() without them configured.
-  // SMTP_HOST/SMTP_PORT default to Gmail (smtp.gmail.com:465) in the
-  // service itself, so they're not required here.
-  SMTP_HOST: Joi.string().allow('').optional(),
-  SMTP_PORT: Joi.string().allow('').optional(),
-  SMTP_USER: Joi.string().allow('').optional(),
-  SMTP_PASSWORD: Joi.string().allow('').optional(),
+  // Email sending via SendGrid's HTTPS API (see
+  // modules/email/mailer.service.ts) — not SMTP, deliberately: Render's
+  // free tier blocks outbound traffic to SMTP ports entirely, which a
+  // plain HTTPS call isn't subject to. Optional for the same reason as
+  // S3 above: MailerService configures its client lazily, so nothing
+  // breaks at boot if these aren't set, only whatever eventually calls
+  // MailerService.send() without them configured.
+  SENDGRID_API_KEY: Joi.string().allow('').optional(),
+  SENDGRID_SENDER: Joi.string().allow('').optional(),
 
   // Base URL for links in outgoing emails (see member.service.ts's
   // invite()). Only validated here, not defaulted — this app reads

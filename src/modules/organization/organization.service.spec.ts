@@ -207,7 +207,7 @@ describe('OrganizationService', () => {
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
       const mailer = makeMailer(
-        jest.fn().mockRejectedValue(new Error('SMTP down')),
+        jest.fn().mockRejectedValue(new Error('SendGrid down')),
       );
       const service = new OrganizationService(prisma, makeS3(), mailer);
       jest.spyOn(service, 'getDetailsBySlug').mockResolvedValue({} as never);

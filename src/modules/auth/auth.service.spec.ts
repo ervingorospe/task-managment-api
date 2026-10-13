@@ -108,7 +108,7 @@ describe('AuthService', () => {
       prisma.user.findFirst.mockResolvedValue(null);
       mockedBcrypt.hash.mockResolvedValue('hashed' as never);
       const mailer = makeMailer(
-        jest.fn().mockRejectedValue(new Error('SMTP down')),
+        jest.fn().mockRejectedValue(new Error('SendGrid down')),
       );
       const service = new AuthService(prisma, makeJwt(), mailer);
 
@@ -520,7 +520,7 @@ describe('AuthService', () => {
       const send = jest
         .fn()
         .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('SMTP down'));
+        .mockRejectedValueOnce(new Error('SendGrid down'));
       const service = new AuthService(prisma, makeJwt(), makeMailer(send));
 
       await expect(service.acceptInvite({ token: 't' } as never)).resolves.toBe(

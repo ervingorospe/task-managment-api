@@ -1,26 +1,23 @@
 import { InternalServerErrorException } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import { MailerService } from './mailer.service';
 
 describe('MailerService', () => {
   const originalEnv = { ...process.env };
-  const sendMail = jest.fn().mockResolvedValue(undefined);
-  let createTransportSpy: jest.SpyInstance;
+  let sendSpy: jest.SpyInstance;
+  let setApiKeySpy: jest.SpyInstance;
 
   beforeEach(() => {
-    process.env.SMTP_HOST = 'smtp.gmail.com';
-    process.env.SMTP_PORT = '465';
-    process.env.SMTP_USER = 'relay.app@gmail.com';
-    process.env.SMTP_PASSWORD = 'app-password';
-    sendMail.mockClear();
-    createTransportSpy = jest
-      .spyOn(nodemailer, 'createTransport')
-      .mockReturnValue({ sendMail } as never);
+    process.env.SENDGRID_API_KEY = 'SG.test-key';
+    process.env.SENDGRID_SENDER = 'relay.app@gmail.com';
+    sendSpy = jest.spyOn(sgMail, 'send').mockResolvedValue(undefined as never);
+    setApiKeySpy = jest.spyOn(sgMail, 'setApiKey').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
-    createTransportSpy.mockRestore();
+    sendSpy.mockRestore();
+    setApiKeySpy.mockRestore();
   });
 
   it('sends with the configured sender and the given destination/subject/html', async () => {
@@ -31,8 +28,8 @@ describe('MailerService', () => {
       html: '<p>Hi</p>',
     });
 
-    expect(sendMail).toHaveBeenCalledTimes(1);
-    expect(sendMail).toHaveBeenCalledWith(
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         from: 'relay.app@gmail.com',
         to: 'jane@example.com',
@@ -42,7 +39,7 @@ describe('MailerService', () => {
     );
   });
 
-  it('passes a plain-text fallback through when given', async () => {
+  it('includes a plain-text body when text is given', async () => {
     const service = new MailerService();
     await service.send({
       to: 'jane@example.com',
@@ -51,78 +48,55 @@ describe('MailerService', () => {
       text: 'Hi',
     });
 
-    expect(sendMail).toHaveBeenCalledWith(
+    expect(sendSpy).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'Hi' }),
     );
   });
 
-  it('builds the transport with implicit TLS on port 465', async () => {
+  it('omits the text field entirely when no plain-text fallback is given', async () => {
     const service = new MailerService();
-    await service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' });
+    await service.send({
+      to: 'jane@example.com',
+      subject: 'Hello',
+      html: '<p>Hi</p>',
+    });
 
-    expect(createTransportSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: { user: 'relay.app@gmail.com', pass: 'app-password' },
-      }),
-    );
+    const [arg] = sendSpy.mock.calls[0];
+    expect(arg).not.toHaveProperty('text');
   });
 
-  it('upgrades via STARTTLS instead of implicit TLS on a non-465 port', async () => {
-    process.env.SMTP_PORT = '587';
-    const service = new MailerService();
-    await service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' });
-
-    expect(createTransportSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ port: 587, secure: false }),
-    );
-  });
-
-  it('defaults to the Gmail host and port when unset', async () => {
-    delete process.env.SMTP_HOST;
-    delete process.env.SMTP_PORT;
-    const service = new MailerService();
-    await service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' });
-
-    expect(createTransportSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ host: 'smtp.gmail.com', port: 465 }),
-    );
-  });
-
-  // Regression test: an env var that's *present but blank* (e.g.
-  // `SMTP_HOST=` left unfilled in .env) is still a string, not
-  // null/undefined — a ?? fallback never caught this and silently built
-  // a transporter pointed at host '' / port 0, which just hung until the
-  // circuit breaker timed out instead of failing clearly. Caught by
-  // testing against a real Gmail account, not by the unset-only test
-  // above.
-  it('defaults to the Gmail host and port when present but blank', async () => {
-    process.env.SMTP_HOST = '';
-    process.env.SMTP_PORT = '';
-    const service = new MailerService();
-    await service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' });
-
-    expect(createTransportSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-      }),
-    );
-  });
-
-  it('reuses the same transporter across multiple sends', async () => {
+  it('sets the API key once, even across multiple sends', async () => {
     const service = new MailerService();
     await service.send({ to: 'a@example.com', subject: 'Hi', html: '<p/>' });
     await service.send({ to: 'b@example.com', subject: 'Hi', html: '<p/>' });
 
-    expect(createTransportSpy).toHaveBeenCalledTimes(1);
+    expect(setApiKeySpy).toHaveBeenCalledTimes(1);
+    expect(setApiKeySpy).toHaveBeenCalledWith('SG.test-key');
   });
 
-  it('throws InternalServerErrorException when SMTP is not fully configured', async () => {
-    delete process.env.SMTP_PASSWORD;
+  it('throws InternalServerErrorException when SENDGRID_API_KEY is missing', async () => {
+    delete process.env.SENDGRID_API_KEY;
+    const service = new MailerService();
+
+    await expect(
+      service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' }),
+    ).rejects.toThrow(InternalServerErrorException);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws InternalServerErrorException when SENDGRID_SENDER is missing', async () => {
+    delete process.env.SENDGRID_SENDER;
+    const service = new MailerService();
+
+    await expect(
+      service.send({ to: 'jane@example.com', subject: 'Hi', html: '<p/>' }),
+    ).rejects.toThrow(InternalServerErrorException);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws InternalServerErrorException when both are present but blank', async () => {
+    process.env.SENDGRID_API_KEY = '';
+    process.env.SENDGRID_SENDER = '';
     const service = new MailerService();
 
     await expect(

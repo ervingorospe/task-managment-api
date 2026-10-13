@@ -20,28 +20,24 @@ const ACCOUNTS = [
     firstName: 'Jane',
     lastName: 'Doe',
     email: 'jane@acmestudio.com',
-    accountType: 'OWNER' as const,
     roleName: 'Superadmin',
   },
   {
     firstName: 'Marco',
     lastName: 'Cruz',
     email: 'marco@acmestudio.com',
-    accountType: 'MEMBER' as const,
     roleName: 'Admin',
   },
   {
     firstName: 'Priya',
     lastName: 'Nair',
     email: 'priya@acmestudio.com',
-    accountType: 'MEMBER' as const,
     roleName: 'Member',
   },
   {
     firstName: 'Alex',
     lastName: 'Rivera',
     email: 'alex@clientco.com',
-    accountType: 'MEMBER' as const,
     roleName: 'Client',
   },
 ];
@@ -91,13 +87,17 @@ async function main() {
       update: {
         firstName: account.firstName,
         lastName: account.lastName,
-        accountType: account.accountType,
+        // Revives the account if an earlier test soft-deleted it — this
+        // script's whole point is a known-good baseline to come back to,
+        // so a previously-deleted mock account should come back working,
+        // not stay a ghost row that upsert's email match silently found
+        // but never actually restored.
+        isDeleted: false,
       },
       create: {
         firstName: account.firstName,
         lastName: account.lastName,
         email: account.email,
-        accountType: account.accountType,
         avatar: `https://i.pravatar.cc/64?u=${account.firstName.toLowerCase()}`,
       },
     });
