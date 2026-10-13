@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { createMockPrisma } from '../../test/mock-prisma';
 import type { JwtService } from '@nestjs/jwt';
-import type { SesService } from '../email/ses.service';
+import type { MailerService } from '../email/mailer.service';
 import type { GoogleProfile } from './strategies/google.strategy';
 
 jest.mock('bcrypt');
@@ -21,8 +21,10 @@ function makeJwt() {
   } as unknown as JwtService;
 }
 
-function makeSes(sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined)) {
-  return { send: sendImpl } as unknown as SesService;
+function makeMailer(
+  sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined),
+) {
+  return { send: sendImpl } as unknown as MailerService;
 }
 
 describe('AuthService', () => {
@@ -34,7 +36,7 @@ describe('AuthService', () => {
       const service = new AuthService(
         createMockPrisma(),
         jwtService,
-        makeSes(),
+        makeMailer(),
       );
 
       expect(service.signToken(7)).toBe('signed-jwt');
@@ -44,7 +46,11 @@ describe('AuthService', () => {
 
   describe('signup', () => {
     it('throws when password and confirmPassword do not match', async () => {
-      const service = new AuthService(createMockPrisma(), makeJwt(), makeSes());
+      const service = new AuthService(
+        createMockPrisma(),
+        makeJwt(),
+        makeMailer(),
+      );
 
       await expect(
         service.signup({ password: 'a', confirmPassword: 'b' } as never),
@@ -54,7 +60,7 @@ describe('AuthService', () => {
     it('throws ConflictException when the (normalized) email already exists', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue({ id: 1 });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.signup({
@@ -71,8 +77,8 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
       mockedBcrypt.hash.mockResolvedValue('hashed' as never);
-      const ses = makeSes();
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer();
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       await service.signup({
         email: '  Jane@Example.com  ',
@@ -82,7 +88,7 @@ describe('AuthService', () => {
         lastName: ' Doe ',
       } as never);
 
-      expect(ses.send).toHaveBeenCalledWith(
+      expect(mailer.send).toHaveBeenCalledWith(
         expect.objectContaining({ to: 'jane@example.com' }),
       );
       expect(prisma.user.create).toHaveBeenCalledWith({
@@ -101,8 +107,10 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
       mockedBcrypt.hash.mockResolvedValue('hashed' as never);
-      const ses = makeSes(jest.fn().mockRejectedValue(new Error('SES down')));
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue(new Error('SMTP down')),
+      );
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       await expect(
         service.signup({
@@ -120,8 +128,10 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
       mockedBcrypt.hash.mockResolvedValue('hashed' as never);
-      const ses = makeSes(jest.fn().mockRejectedValue('string rejection'));
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue('string rejection'),
+      );
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       await expect(
         service.signup({
@@ -139,7 +149,7 @@ describe('AuthService', () => {
     it('throws UnauthorizedException when no user matches', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'a' } as never),
@@ -149,7 +159,7 @@ describe('AuthService', () => {
     it('throws UnauthorizedException for a Google-only account (no passwordHash)', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue({ id: 1, passwordHash: null });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'a' } as never),
@@ -160,7 +170,7 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue({ id: 1, passwordHash: 'h' });
       mockedBcrypt.compare.mockResolvedValue(false as never);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'wrong' } as never),
@@ -175,7 +185,7 @@ describe('AuthService', () => {
         isActive: false,
       });
       mockedBcrypt.compare.mockResolvedValue(true as never);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'a' } as never),
@@ -191,7 +201,7 @@ describe('AuthService', () => {
         isVerified: false,
       });
       mockedBcrypt.compare.mockResolvedValue(true as never);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'a' } as never),
@@ -207,7 +217,7 @@ describe('AuthService', () => {
         isVerified: true,
       });
       mockedBcrypt.compare.mockResolvedValue(true as never);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.login({ email: 'x@y.com', password: 'a' } as never),
@@ -219,7 +229,7 @@ describe('AuthService', () => {
     it('throws BadRequestException for an unknown token', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.getInviteInfo('bad')).rejects.toThrow(
         'Invalid or already-used invite link.',
@@ -229,7 +239,7 @@ describe('AuthService', () => {
     it('throws BadRequestException when the invite is not PENDING', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue({ status: 'ACCEPTED' });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.getInviteInfo('t')).rejects.toThrow(
         'This invite is no longer pending.',
@@ -242,7 +252,7 @@ describe('AuthService', () => {
         status: 'PENDING',
         expiry: new Date('2000-01-01'),
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.getInviteInfo('t')).rejects.toThrow(
         'This invite has expired.',
@@ -266,7 +276,7 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(pendingInvite());
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const result = await service.getInviteInfo('t');
       expect(result.requiresPassword).toBe(true);
@@ -276,7 +286,7 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(pendingInvite());
       prisma.user.findFirst.mockResolvedValue({ id: 1 });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const result = await service.getInviteInfo('t');
       expect(result.requiresPassword).toBe(false);
@@ -288,7 +298,7 @@ describe('AuthService', () => {
         pendingInvite({ email: 'jane@gmail.com' }),
       );
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const result = await service.getInviteInfo('t');
       expect(result.requiresPassword).toBe(false);
@@ -319,7 +329,7 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(pendingInvite());
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.acceptInvite({ token: 't' } as never),
@@ -339,7 +349,7 @@ describe('AuthService', () => {
         isActive: true,
       });
       prisma.member.findFirst.mockResolvedValue(null); // alreadyMember check
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const userId = await service.acceptInvite({
         token: 't',
@@ -374,7 +384,7 @@ describe('AuthService', () => {
         isActive: true,
       });
       prisma.member.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.acceptInvite({ token: 't' } as never);
 
@@ -401,7 +411,7 @@ describe('AuthService', () => {
         isActive: true,
       });
       prisma.member.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.acceptInvite({ token: 't' } as never);
 
@@ -414,7 +424,7 @@ describe('AuthService', () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(pendingInvite());
       prisma.user.findFirst.mockResolvedValue({ id: 1, isActive: false });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(
         service.acceptInvite({ token: 't' } as never),
@@ -434,7 +444,7 @@ describe('AuthService', () => {
       prisma.member.findFirst
         .mockResolvedValueOnce(null) // alreadyMember check (checked first)
         .mockResolvedValueOnce({ id: 50 }); // existingMember in acceptInviteForNewUser
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.acceptInvite({ token: 't' } as never);
 
@@ -459,7 +469,7 @@ describe('AuthService', () => {
       prisma.member.findFirst
         .mockResolvedValueOnce(null) // alreadyMember check
         .mockResolvedValueOnce(null); // existingMember in acceptInviteForNewUser
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.acceptInvite({ token: 't' } as never);
 
@@ -481,7 +491,7 @@ describe('AuthService', () => {
         email: 'jane@example.com',
       });
       prisma.member.findFirst.mockResolvedValueOnce({ id: 1 }); // alreadyMember: true
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.acceptInvite({ token: 't' } as never);
 
@@ -510,8 +520,8 @@ describe('AuthService', () => {
       const send = jest
         .fn()
         .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error('SES down'));
-      const service = new AuthService(prisma, makeJwt(), makeSes(send));
+        .mockRejectedValueOnce(new Error('SMTP down'));
+      const service = new AuthService(prisma, makeJwt(), makeMailer(send));
 
       await expect(service.acceptInvite({ token: 't' } as never)).resolves.toBe(
         1,
@@ -532,7 +542,7 @@ describe('AuthService', () => {
       });
       prisma.member.findFirst.mockResolvedValueOnce({ id: 1 });
       const send = jest.fn().mockRejectedValue('string rejection');
-      const service = new AuthService(prisma, makeJwt(), makeSes(send));
+      const service = new AuthService(prisma, makeJwt(), makeMailer(send));
 
       await expect(service.acceptInvite({ token: 't' } as never)).resolves.toBe(
         1,
@@ -556,7 +566,7 @@ describe('AuthService', () => {
         invitedByMember: { email: 'inviter@example.com' },
         resentByMember: null,
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.declineInvite({ token: 't' } as never);
 
@@ -587,7 +597,7 @@ describe('AuthService', () => {
         isActive: true,
         isVerified: true,
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const result = await service.findOrCreateFromGoogle(profile());
       expect(result).toEqual({ userId: 1, needsVerification: false });
@@ -604,7 +614,7 @@ describe('AuthService', () => {
         isActive: true,
         isVerified: true,
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.findOrCreateFromGoogle(profile());
 
@@ -624,7 +634,7 @@ describe('AuthService', () => {
         isActive: true,
         isVerified: true,
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.findOrCreateFromGoogle(profile());
 
@@ -650,7 +660,7 @@ describe('AuthService', () => {
         isVerified: true,
       });
       prisma.member.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       const result = await service.findOrCreateFromGoogle(profile());
 
@@ -675,12 +685,12 @@ describe('AuthService', () => {
         isActive: true,
         isVerified: false,
       });
-      const ses = makeSes();
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer();
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       const result = await service.findOrCreateFromGoogle(profile());
 
-      expect(ses.send).toHaveBeenCalled();
+      expect(mailer.send).toHaveBeenCalled();
       expect(prisma.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ isVerified: false }),
@@ -692,7 +702,7 @@ describe('AuthService', () => {
     it('throws UnauthorizedException for a deactivated account', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue({ id: 1, isActive: false });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.findOrCreateFromGoogle(profile())).rejects.toThrow(
         UnauthorizedException,
@@ -704,7 +714,7 @@ describe('AuthService', () => {
     it('throws BadRequestException when no account matches', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.resendVerification('x@y.com')).rejects.toThrow(
         'No account found for this email.',
@@ -714,7 +724,7 @@ describe('AuthService', () => {
     it('throws BadRequestException when already verified', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue({ id: 1, isVerified: true });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.resendVerification('x@y.com')).rejects.toThrow(
         'This account is already verified.',
@@ -728,7 +738,7 @@ describe('AuthService', () => {
         isVerified: false,
         lastVerificationSentAt: new Date(),
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.resendVerification('x@y.com')).rejects.toThrow(
         /Please wait \d+s before resending\./,
@@ -744,12 +754,12 @@ describe('AuthService', () => {
         isVerified: false,
         lastVerificationSentAt: null,
       });
-      const ses = makeSes();
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer();
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       await service.resendVerification('x@y.com');
 
-      expect(ses.send).toHaveBeenCalled();
+      expect(mailer.send).toHaveBeenCalled();
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 1 },
@@ -769,11 +779,11 @@ describe('AuthService', () => {
         isVerified: false,
         lastVerificationSentAt: new Date(Date.now() - 10 * 60 * 1000),
       });
-      const ses = makeSes();
-      const service = new AuthService(prisma, makeJwt(), ses);
+      const mailer = makeMailer();
+      const service = new AuthService(prisma, makeJwt(), mailer);
 
       await service.resendVerification('x@y.com');
-      expect(ses.send).toHaveBeenCalled();
+      expect(mailer.send).toHaveBeenCalled();
     });
   });
 
@@ -781,7 +791,7 @@ describe('AuthService', () => {
     it('throws BadRequestException for an unknown token', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.verifyEmail('bad')).rejects.toThrow(
         'Invalid or already-used verification link.',
@@ -794,7 +804,7 @@ describe('AuthService', () => {
         id: 1,
         verificationTokenExpiry: new Date('2000-01-01'),
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.verifyEmail('t')).rejects.toThrow(
         'This verification link has expired.',
@@ -807,7 +817,7 @@ describe('AuthService', () => {
         id: 7,
         verificationTokenExpiry: null,
       });
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await expect(service.verifyEmail('t')).resolves.toBe(7);
       expect(prisma.user.update).toHaveBeenCalledWith({
@@ -824,7 +834,7 @@ describe('AuthService', () => {
   describe('completeOnboarding', () => {
     it('marks the user as onboarded', async () => {
       const prisma = createMockPrisma();
-      const service = new AuthService(prisma, makeJwt(), makeSes());
+      const service = new AuthService(prisma, makeJwt(), makeMailer());
 
       await service.completeOnboarding(7);
 

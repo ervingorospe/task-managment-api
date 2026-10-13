@@ -31,10 +31,10 @@ const DEFAULTS: Required<CircuitBreakerOptions> = {
 };
 
 /**
- * Wraps an async call to an external dependency (SES, S3, ...) so repeated
+ * Wraps an async call to an external dependency (SMTP, S3, ...) so repeated
  * failures make it fail fast instead of piling up slow timeouts — see
- * this app's own notes on SES sandbox failures for why this matters here.
- * Not for calls to our own database; only for dependencies we don't
+ * this app's own notes on SMTP outages for why this matters here. Not
+ * for calls to our own database; only for dependencies we don't
  * control and that can legitimately be down independently of us.
  */
 export function createCircuitBreaker<Args extends unknown[], R>(

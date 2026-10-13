@@ -6,14 +6,16 @@ import {
 import { OrganizationService } from './organization.service';
 import { createMockPrisma } from '../../test/mock-prisma';
 import type { S3Service } from '../storage/s3.service';
-import type { SesService } from '../email/ses.service';
+import type { MailerService } from '../email/mailer.service';
 
 function makeS3() {
   return { upload: jest.fn(), delete: jest.fn() } as unknown as S3Service;
 }
 
-function makeSes(sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined)) {
-  return { send: sendImpl } as unknown as SesService;
+function makeMailer(
+  sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined),
+) {
+  return { send: sendImpl } as unknown as MailerService;
 }
 
 const OWNER = {
@@ -28,7 +30,7 @@ describe('OrganizationService', () => {
     it('throws BadRequestException when the owner does not exist', async () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create({ organizationName: 'Acme' } as never, 1),
@@ -39,7 +41,7 @@ describe('OrganizationService', () => {
       const prisma = createMockPrisma();
       prisma.user.findFirst.mockResolvedValue(OWNER);
       prisma.organization.findFirst.mockResolvedValue({ id: 99 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create({ organizationName: 'Acme' } as never, 1),
@@ -53,7 +55,7 @@ describe('OrganizationService', () => {
       (prisma.$transaction as jest.Mock).mockRejectedValue(
         new Error('tx failed'),
       );
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create(
@@ -73,7 +75,7 @@ describe('OrganizationService', () => {
       prisma.user.findFirst.mockResolvedValue(OWNER);
       prisma.organization.findFirst.mockResolvedValue(null);
       (prisma.$transaction as jest.Mock).mockRejectedValue('string rejection');
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create(
@@ -98,7 +100,7 @@ describe('OrganizationService', () => {
         organizationName: 'Acme',
       });
       prisma.role.create.mockResolvedValue({ id: 10 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create(
@@ -127,7 +129,7 @@ describe('OrganizationService', () => {
       );
       prisma.member.create.mockResolvedValue({ id: 50 });
 
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
       const detailsSpy = jest
         .spyOn(service, 'getDetailsBySlug')
         .mockResolvedValue({ id: 5 } as never);
@@ -178,7 +180,7 @@ describe('OrganizationService', () => {
       });
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.create(
@@ -204,8 +206,10 @@ describe('OrganizationService', () => {
       });
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
-      const ses = makeSes(jest.fn().mockRejectedValue(new Error('SES down')));
-      const service = new OrganizationService(prisma, makeS3(), ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue(new Error('SMTP down')),
+      );
+      const service = new OrganizationService(prisma, makeS3(), mailer);
       jest.spyOn(service, 'getDetailsBySlug').mockResolvedValue({} as never);
 
       await service.create(
@@ -232,8 +236,10 @@ describe('OrganizationService', () => {
       });
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
-      const ses = makeSes(jest.fn().mockRejectedValue('string rejection'));
-      const service = new OrganizationService(prisma, makeS3(), ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue('string rejection'),
+      );
+      const service = new OrganizationService(prisma, makeS3(), mailer);
       jest.spyOn(service, 'getDetailsBySlug').mockResolvedValue({} as never);
 
       await service.create(
@@ -266,7 +272,11 @@ describe('OrganizationService', () => {
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
       const send = jest.fn().mockResolvedValue(undefined);
-      const service = new OrganizationService(prisma, makeS3(), makeSes(send));
+      const service = new OrganizationService(
+        prisma,
+        makeS3(),
+        makeMailer(send),
+      );
       jest.spyOn(service, 'getDetailsBySlug').mockResolvedValue({} as never);
 
       await service.create(
@@ -299,7 +309,7 @@ describe('OrganizationService', () => {
       });
       prisma.role.create.mockResolvedValue({ id: 100 });
       prisma.member.create.mockResolvedValue({ id: 50 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
       const detailsSpy = jest
         .spyOn(service, 'getDetailsBySlug')
         .mockResolvedValue({} as never);
@@ -329,7 +339,7 @@ describe('OrganizationService', () => {
           settings: { slug: 'acme' },
         },
       ]);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await service.myOwnOrganizations(1);
 
@@ -370,7 +380,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException when no org matches', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(service.getDetailsById(5)).rejects.toThrow(
         NotFoundException,
@@ -380,7 +390,7 @@ describe('OrganizationService', () => {
     it('filters the owner out of the members list', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(baseOrg());
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await service.getDetailsById(5);
 
@@ -401,7 +411,7 @@ describe('OrganizationService', () => {
           ],
         }),
       );
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await service.getDetailsById(5);
 
@@ -426,7 +436,7 @@ describe('OrganizationService', () => {
           ],
         }),
       );
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.getDetailsById(5);
 
@@ -443,7 +453,7 @@ describe('OrganizationService', () => {
           ],
         }),
       );
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await service.getDetailsById(5);
 
@@ -458,7 +468,7 @@ describe('OrganizationService', () => {
     it('reports pendingOwnershipTransfer as null when there is none', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(baseOrg());
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await service.getDetailsById(5);
       expect(result.pendingOwnershipTransfer).toBeNull();
@@ -467,7 +477,7 @@ describe('OrganizationService', () => {
     it('getDetailsBySlug resolves an org by its settings slug', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(baseOrg());
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.getDetailsBySlug('acme');
 
@@ -481,7 +491,7 @@ describe('OrganizationService', () => {
     it('getDetailsWhere defaults to the main PrismaService when called without a tx', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(baseOrg());
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       const result = await (
         service as unknown as {
@@ -499,7 +509,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException for an inactive/missing org', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(service.updateBasicInfo(5, {} as never)).rejects.toThrow(
         NotFoundException,
@@ -515,7 +525,7 @@ describe('OrganizationService', () => {
           organizationName: 'Old',
         })
         .mockResolvedValueOnce({ id: 99 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.updateBasicInfo(5, { organizationName: 'New' } as never),
@@ -530,7 +540,7 @@ describe('OrganizationService', () => {
         organizationName: 'Acme',
       });
       prisma.organization.update.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateBasicInfo(5, { organizationName: 'Acme' } as never);
 
@@ -550,7 +560,7 @@ describe('OrganizationService', () => {
         })
         .mockResolvedValueOnce(null);
       prisma.organization.update.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateBasicInfo(5, { organizationName: 'New' } as never);
 
@@ -565,7 +575,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException for a missing org', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.uploadLogo(5, {} as Express.Multer.File),
@@ -580,7 +590,7 @@ describe('OrganizationService', () => {
         key: 'k',
         url: 'https://x/k',
       });
-      const service = new OrganizationService(prisma, s3, makeSes());
+      const service = new OrganizationService(prisma, s3, makeMailer());
 
       const result = await service.uploadLogo(5, {} as Express.Multer.File);
 
@@ -596,7 +606,7 @@ describe('OrganizationService', () => {
     it('updates the timezone', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateTimezone(5, { timezone: 'UTC' } as never);
 
@@ -609,7 +619,7 @@ describe('OrganizationService', () => {
     it('updates the invite expiration', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateInviteExpiration(5, {
         inviteExpiration: '1_week',
@@ -624,7 +634,7 @@ describe('OrganizationService', () => {
     it('updates the notification preference', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateNotifications(5, { sendEmailNotif: false } as never);
 
@@ -637,7 +647,7 @@ describe('OrganizationService', () => {
     it('updates the active state', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue({ id: 5 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.updateActiveState(5, { isActive: false } as never);
 
@@ -652,7 +662,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException for a missing org', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(service.remove(5)).rejects.toThrow(NotFoundException);
     });
@@ -670,7 +680,7 @@ describe('OrganizationService', () => {
         .mockResolvedValueOnce({ id: 1 }) // user 3: ownsElsewhere -> spared
         .mockResolvedValueOnce(null); // user 1: ownsElsewhere
       prisma.member.findFirst.mockResolvedValue(null); // nobody is a member elsewhere
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.remove(5);
 
@@ -689,7 +699,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException for a missing/inactive org', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.requestOwnershipTransfer(5, {} as never, 1),
@@ -701,7 +711,7 @@ describe('OrganizationService', () => {
       prisma.organization.findFirst.mockResolvedValue({ id: 5 });
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
       prisma.memberInvite.findFirst.mockResolvedValue({ id: 1 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.requestOwnershipTransfer(5, {} as never, 1),
@@ -714,7 +724,7 @@ describe('OrganizationService', () => {
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
       prisma.memberInvite.findFirst.mockResolvedValue(null);
       prisma.role.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(
         service.requestOwnershipTransfer(5, { email: 'x@y.com' } as never, 1),
@@ -728,7 +738,7 @@ describe('OrganizationService', () => {
       prisma.memberInvite.findFirst.mockResolvedValue(null);
       prisma.role.findFirst.mockResolvedValue({ id: 100 });
       prisma.memberInvite.create.mockResolvedValue({ id: 9 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.requestOwnershipTransfer(
         5,
@@ -752,7 +762,7 @@ describe('OrganizationService', () => {
     it('throws NotFoundException when nothing is pending', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(null);
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await expect(service.cancelOwnershipTransfer(5)).rejects.toThrow(
         NotFoundException,
@@ -762,7 +772,7 @@ describe('OrganizationService', () => {
     it('cancels and soft-deletes the pending transfer invite', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue({ id: 9 });
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
 
       await service.cancelOwnershipTransfer(5);
 
@@ -776,7 +786,7 @@ describe('OrganizationService', () => {
   describe('defaults', () => {
     it('lists default (global) roles', async () => {
       const prisma = createMockPrisma();
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
       await service.defaultRoles();
       expect(prisma.role.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { orgId: null, isDeleted: false } }),
@@ -785,7 +795,7 @@ describe('OrganizationService', () => {
 
     it('lists default (global) tags', async () => {
       const prisma = createMockPrisma();
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
       await service.defaultTags();
       expect(prisma.tag.findMany).toHaveBeenCalledWith({
         where: { orgId: null, isDeleted: false },
@@ -794,7 +804,7 @@ describe('OrganizationService', () => {
 
     it('lists every rule category with its rules', async () => {
       const prisma = createMockPrisma();
-      const service = new OrganizationService(prisma, makeS3(), makeSes());
+      const service = new OrganizationService(prisma, makeS3(), makeMailer());
       await service.defaultPermissions();
       expect(prisma.ruleCategory.findMany).toHaveBeenCalledWith({
         include: { rules: true },

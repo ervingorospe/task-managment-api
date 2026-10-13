@@ -25,13 +25,16 @@ export const configValidationSchema = Joi.object({
   AWS_ACCESS_KEY_ID: Joi.string().allow('').optional(),
   AWS_SECRET_ACCESS_KEY: Joi.string().allow('').optional(),
 
-  // Email sending via SES (see modules/email/ses.service.ts) — optional
-  // for the same reason: SesService builds its client lazily, so nothing
-  // breaks at boot if these aren't set, only whatever eventually calls
-  // SesService.send() without them configured.
-  AWS_SES_ACCESS_KEY: Joi.string().allow('').optional(),
-  AWS_SES_SECRET_ACCESS_KEY: Joi.string().allow('').optional(),
-  AWS_SES_SENDER: Joi.string().allow('').optional(),
+  // Email sending via SMTP (see modules/email/mailer.service.ts) —
+  // optional for the same reason: MailerService builds its transporter
+  // lazily, so nothing breaks at boot if these aren't set, only whatever
+  // eventually calls MailerService.send() without them configured.
+  // SMTP_HOST/SMTP_PORT default to Gmail (smtp.gmail.com:465) in the
+  // service itself, so they're not required here.
+  SMTP_HOST: Joi.string().allow('').optional(),
+  SMTP_PORT: Joi.string().allow('').optional(),
+  SMTP_USER: Joi.string().allow('').optional(),
+  SMTP_PASSWORD: Joi.string().allow('').optional(),
 
   // Base URL for links in outgoing emails (see member.service.ts's
   // invite()). Only validated here, not defaulted — this app reads

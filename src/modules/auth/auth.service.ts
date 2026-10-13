@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SesService } from '../email/ses.service';
+import { MailerService } from '../email/mailer.service';
 import { renderVerifyEmail } from '../email/templates/verify-email.template';
 import { renderInviteResponseEmail } from '../email/templates/invite-response.template';
 import {
@@ -33,7 +33,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly ses: SesService,
+    private readonly mailer: MailerService,
   ) {}
 
   signToken(userId: number): string {
@@ -69,7 +69,7 @@ export class AuthService {
     const { subject, html, text } = renderVerifyEmail({ firstName, verifyUrl });
 
     try {
-      await this.ses.send({ to: email, subject, html, text });
+      await this.mailer.send({ to: email, subject, html, text });
       this.logger.log(`Verification email sent to ${email}`);
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Unknown error';
@@ -77,9 +77,9 @@ export class AuthService {
         `Failed to send verification email to ${email}: ${detail}`,
         error instanceof Error ? error.stack : undefined,
       );
-      // The real cause (SES sandbox restrictions, etc.) is logged above —
-      // never surface it to the client, same rule AllExceptionsFilter
-      // applies to every other unexpected 500.
+      // The real cause (bad SMTP credentials, the provider throttling
+      // us, etc.) is logged above — never surface it to the client, same
+      // rule AllExceptionsFilter applies to every other unexpected 500.
       throw new InternalServerErrorException(
         'Failed to send verification email, try again later.',
       );
@@ -293,7 +293,7 @@ export class AuthService {
     await Promise.all(
       Array.from(recipients.values()).map(async (to) => {
         try {
-          await this.ses.send({ to, subject, html, text });
+          await this.mailer.send({ to, subject, html, text });
         } catch (error) {
           this.logger.warn(
             `Failed to send invite-response email to ${to}`,

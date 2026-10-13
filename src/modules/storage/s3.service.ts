@@ -36,7 +36,7 @@ export class S3Service {
   // rather than just the upload feature that actually needs it.
   private client: S3Client | null = null;
 
-  // Same reasoning as SesService's breaker — a struggling/down S3 shouldn't
+  // Same reasoning as MailerService's breaker — a struggling/down S3 shouldn't
   // mean every upload/delete call pays a full timeout. Shared across both
   // operations below since they're the same dependency: either one failing
   // means S3 itself is unhealthy, not just uploads or just deletes.

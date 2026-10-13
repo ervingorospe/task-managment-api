@@ -44,21 +44,22 @@ describe('configValidationSchema', () => {
     expect(error?.message).toContain(key);
   });
 
-  it('allows AWS/SES/frontend vars to be entirely absent', () => {
+  it('allows AWS/SMTP/frontend vars to be entirely absent', () => {
     const { error } = configValidationSchema.validate(REQUIRED_ENV);
     expect(error).toBeUndefined();
   });
 
-  it('allows AWS/SES vars to be present but blank', () => {
+  it('allows AWS/SMTP vars to be present but blank', () => {
     const { error } = configValidationSchema.validate({
       ...REQUIRED_ENV,
       AWS_REGION: '',
       AWS_S3_BUCKET: '',
       AWS_ACCESS_KEY_ID: '',
       AWS_SECRET_ACCESS_KEY: '',
-      AWS_SES_ACCESS_KEY: '',
-      AWS_SES_SECRET_ACCESS_KEY: '',
-      AWS_SES_SENDER: '',
+      SMTP_HOST: '',
+      SMTP_PORT: '',
+      SMTP_USER: '',
+      SMTP_PASSWORD: '',
       FRONTEND_URL: '',
       BACKEND_URL: '',
     });

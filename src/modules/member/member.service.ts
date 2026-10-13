@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { assertCapacity } from '../../common/helper/assert-capacity.helper';
 import { resolveActingMemberId } from '../../common/helper/resolve-acting-member.helper';
-import { SesService } from '../email/ses.service';
+import { MailerService } from '../email/mailer.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
 import {
   computeInviteExpiry,
@@ -30,7 +30,7 @@ export class MemberService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly ses: SesService,
+    private readonly mailer: MailerService,
   ) {}
 
   // Sent *before* the invite row is created/updated (see invite() and
@@ -68,7 +68,7 @@ export class MemberService {
     });
 
     try {
-      await this.ses.send({ to, subject, html, text });
+      await this.mailer.send({ to, subject, html, text });
       this.logger.log(`Invite email sent to ${to}`);
     } catch (error) {
       this.logger.warn(

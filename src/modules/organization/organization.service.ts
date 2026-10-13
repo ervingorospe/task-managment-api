@@ -10,7 +10,7 @@ import { InviteStatus, Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PUBLIC_USER_SELECT } from '../../common/helper/public-user-select.helper';
 import { S3Service } from '../storage/s3.service';
-import { SesService } from '../email/ses.service';
+import { MailerService } from '../email/mailer.service';
 import { renderMemberInviteEmail } from '../email/templates/member-invite.template';
 import { computeInviteExpiry } from '../../common/helper/invite-expiration.helper';
 import { baseSlug } from '../../common/helper/slug.helper';
@@ -31,7 +31,7 @@ export class OrganizationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly s3: S3Service,
-    private readonly ses: SesService,
+    private readonly mailer: MailerService,
   ) {}
 
   private async uniqueSlug(name: string): Promise<string> {
@@ -206,7 +206,7 @@ export class OrganizationService {
         });
 
         try {
-          await this.ses.send({ to: inviteDto.email, subject, html, text });
+          await this.mailer.send({ to: inviteDto.email, subject, html, text });
         } catch (error) {
           // A flaky send on one invite shouldn't sink the whole org the
           // owner just spent a multi-step wizard creating — skip this one

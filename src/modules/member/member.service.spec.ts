@@ -6,10 +6,12 @@ import {
 } from '@nestjs/common';
 import { MemberService } from './member.service';
 import { createMockPrisma } from '../../test/mock-prisma';
-import type { SesService } from '../email/ses.service';
+import type { MailerService } from '../email/mailer.service';
 
-function makeSes(sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined)) {
-  return { send: sendImpl } as unknown as SesService;
+function makeMailer(
+  sendImpl: jest.Mock = jest.fn().mockResolvedValue(undefined),
+) {
+  return { send: sendImpl } as unknown as MailerService;
 }
 
 function withOrgAndRole(prisma: ReturnType<typeof createMockPrisma>) {
@@ -28,7 +30,7 @@ describe('MemberService', () => {
       prisma.organization.findUnique.mockResolvedValue({ ownerId: 1 });
       prisma.member.findMany.mockResolvedValue([]);
       prisma.member.count.mockResolvedValue(0);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.members({ orgId: 5 } as never);
 
@@ -44,7 +46,7 @@ describe('MemberService', () => {
     it('adds a case-insensitive OR search across name/email fields', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findUnique.mockResolvedValue({ ownerId: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.members({ orgId: 5, search: 'jane' } as never);
 
@@ -62,7 +64,7 @@ describe('MemberService', () => {
     it('orders by email when sortBy is "email"', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findUnique.mockResolvedValue({ ownerId: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.members({ orgId: 5, sortBy: 'email' } as never);
 
@@ -74,7 +76,7 @@ describe('MemberService', () => {
     it('orders by first/last name by default', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findUnique.mockResolvedValue({ ownerId: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.members({ orgId: 5 } as never);
 
@@ -88,7 +90,7 @@ describe('MemberService', () => {
     it('does not exclude anyone by ownerId when the org itself is not found', async () => {
       const prisma = createMockPrisma();
       prisma.organization.findUnique.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.members({ orgId: 5 } as never);
 
@@ -101,7 +103,7 @@ describe('MemberService', () => {
   describe('invites', () => {
     it('sweeps expired invites before listing', async () => {
       const prisma = createMockPrisma();
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.invites(5);
 
@@ -118,7 +120,7 @@ describe('MemberService', () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1 }); // resolveActingMemberId
       prisma.memberInvite.findFirst.mockResolvedValue({ id: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -134,7 +136,7 @@ describe('MemberService', () => {
       prisma.organizationCapacity.findUnique.mockResolvedValue({
         members: 5,
       });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -153,8 +155,8 @@ describe('MemberService', () => {
       });
       withOrgAndRole(prisma);
       prisma.memberInvite.create.mockResolvedValue({ id: 9 });
-      const ses = makeSes();
-      const service = new MemberService(prisma, ses);
+      const mailer = makeMailer();
+      const service = new MemberService(prisma, mailer);
 
       await service.invite(
         5,
@@ -162,7 +164,7 @@ describe('MemberService', () => {
         1,
       );
 
-      expect(ses.send).toHaveBeenCalledWith(
+      expect(mailer.send).toHaveBeenCalledWith(
         expect.objectContaining({ to: 'jane@x.com' }),
       );
       expect(prisma.memberInvite.create).toHaveBeenCalledWith(
@@ -187,8 +189,10 @@ describe('MemberService', () => {
       prisma.organizationCapacity.findUnique.mockResolvedValue(null);
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       withOrgAndRole(prisma);
-      const ses = makeSes(jest.fn().mockRejectedValue(new Error('SES down')));
-      const service = new MemberService(prisma, ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue(new Error('SMTP down')),
+      );
+      const service = new MemberService(prisma, mailer);
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -205,8 +209,10 @@ describe('MemberService', () => {
       prisma.organizationCapacity.findUnique.mockResolvedValue(null);
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       withOrgAndRole(prisma);
-      const ses = makeSes(jest.fn().mockRejectedValue('string rejection'));
-      const service = new MemberService(prisma, ses);
+      const mailer = makeMailer(
+        jest.fn().mockRejectedValue('string rejection'),
+      );
+      const service = new MemberService(prisma, mailer);
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -223,7 +229,7 @@ describe('MemberService', () => {
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       prisma.organization.findUnique.mockResolvedValue(null);
       prisma.role.findUnique.mockResolvedValue({ id: 2, roleName: 'Member' });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -243,7 +249,7 @@ describe('MemberService', () => {
         settings: {},
       });
       prisma.role.findUnique.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(
         service.invite(5, { email: 'jane@x.com', roleId: 2 } as never, 1),
@@ -255,7 +261,7 @@ describe('MemberService', () => {
     it('throws NotFoundException for a missing invite', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.resend(1, 1)).rejects.toThrow(NotFoundException);
     });
@@ -269,7 +275,7 @@ describe('MemberService', () => {
         expiry: null,
       });
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.resend(1, 1)).rejects.toThrow(
         'This invite is no longer pending.',
@@ -285,7 +291,7 @@ describe('MemberService', () => {
         expiry: new Date('2000-01-01'),
       });
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.resend(1, 1)).rejects.toThrow(BadRequestException);
       expect(prisma.memberInvite.update).toHaveBeenCalledWith({
@@ -305,7 +311,7 @@ describe('MemberService', () => {
         createdAt: new Date(),
       });
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.resend(1, 1)).rejects.toThrow(
         /Please wait \d+s before resending\./,
@@ -329,12 +335,12 @@ describe('MemberService', () => {
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       withOrgAndRole(prisma);
       prisma.memberInvite.update.mockResolvedValue({ id: 1 });
-      const ses = makeSes();
-      const service = new MemberService(prisma, ses);
+      const mailer = makeMailer();
+      const service = new MemberService(prisma, mailer);
 
       await service.resend(1, 1);
 
-      expect(ses.send).toHaveBeenCalled();
+      expect(mailer.send).toHaveBeenCalled();
       expect(prisma.memberInvite.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: {
@@ -363,7 +369,7 @@ describe('MemberService', () => {
       prisma.member.findFirst.mockResolvedValue({ id: 2 });
       prisma.organizationSettings.findUnique.mockResolvedValue(null);
       withOrgAndRole(prisma);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.resend(1, 1);
 
@@ -377,7 +383,7 @@ describe('MemberService', () => {
     it('throws NotFoundException for a missing invite', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.removeInvite(1)).rejects.toThrow(NotFoundException);
     });
@@ -385,7 +391,7 @@ describe('MemberService', () => {
     it('soft-deletes and cancels an existing invite', async () => {
       const prisma = createMockPrisma();
       prisma.memberInvite.findFirst.mockResolvedValue({ id: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.removeInvite(1);
 
@@ -400,7 +406,7 @@ describe('MemberService', () => {
     it('throws NotFoundException for a missing member on updateRole', async () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(
         service.updateRole(1, { roleId: 2 } as never),
@@ -410,7 +416,7 @@ describe('MemberService', () => {
     it('updates the role for an existing member', async () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.updateRole(1, { roleId: 2 } as never);
 
@@ -424,7 +430,7 @@ describe('MemberService', () => {
     it('updates the active state for an existing member', async () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1 });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.updateActiveState(1, { isActive: false } as never);
 
@@ -439,7 +445,7 @@ describe('MemberService', () => {
     it('throws NotFoundException for a missing member', async () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue(null);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await expect(service.remove(1)).rejects.toThrow(NotFoundException);
     });
@@ -448,7 +454,7 @@ describe('MemberService', () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1, userId: 7 });
       prisma.member.count.mockResolvedValue(0);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.remove(1);
 
@@ -466,7 +472,7 @@ describe('MemberService', () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1, userId: 7 });
       prisma.member.count.mockResolvedValue(1);
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.remove(1);
 
@@ -476,7 +482,7 @@ describe('MemberService', () => {
     it('skips the user-deactivation check entirely for an already-userless member row', async () => {
       const prisma = createMockPrisma();
       prisma.member.findFirst.mockResolvedValue({ id: 1, userId: null });
-      const service = new MemberService(prisma, makeSes());
+      const service = new MemberService(prisma, makeMailer());
 
       await service.remove(1);
 
